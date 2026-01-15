@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "framework": "pytorch",
+  "models": {
+    "vision": {
+      "name": "MedSigLIP Vision Encoder",
+      "file": "medsiglip_vision.ptl",
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "output_shape": [
+        1,
+        768
+      ],
+      "description": "Medical image embeddings",
+      "status": "placeholder - download with: python models/download_models.py"
+    },
+    "acoustic": {
+      "name": "Acoustic Feature Extractor",
+      "file": "acoustic_features.ptl",
+      "input_shape": [
+        1,
+        128,
+        100
+      ],
+      "output_shape": [
+        1,
+        64
+      ],
+      "description": "Cry audio feature extraction",
+      "status": "ready"
+    }
+  },
+  "text_embeddings": {
+    "file": "text_embeddings.json",
+    "description": "Pre-computed text embeddings for zero-shot classification"
+  },
+  "thresholds": {
+    "anemia": 0.5,
+    "jaundice": 0.5,
+    "asphyxia": 0.5
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "protocol_name": "WHO IMNCI Simplified",
+  "version": "2024.1",
+  "description": "Integrated Management of Neonatal and Childhood Illness - Simplified for CHW use",
+  "source": "WHO/UNICEF",
+
+  "danger_signs": {
+    "infant_0_2_months": [
+      "Not able to feed",
+      "Convulsions",
+      "Fast breathing (60+ breaths/min)",
+      "Severe chest indrawing",
+      "Fever (38C+) or low body temperature (<35.5C)",
+      "Movement only when stimulated or no movement"
+    ],
+    "child_2_months_5_years": [
+      "Not able to drink or breastfeed",
+      "Vomits everything",
+      "Convulsions",
+      "Lethargic or unconscious"
+    ]
+  },
+
+  "assessment_categories": {
+    "cough_breathing": {
+      "name": "Cough or Difficult Breathing",
+      "questions": [
+        "How long has the child had cough?",
+        "Is the child able to drink?",
+        "Has the child had convulsions?"
+      ],
+      "examination": [
+        "Count breaths per minute",
+        "Look for chest indrawing",
+        "Look and listen for stridor",
+        "Look and listen for wheezing"
+      ],
+      "classifications": {
+        "severe_pneumonia": {
+          "signs": ["Any danger sign", "Chest indrawing", "Stridor in calm child"],
+          "action": "REFER URGENTLY to hospital",
+          "pre_referral": ["First dose antibiotic", "Keep child warm"]
+        },
+        "pneumonia": {
+          "signs": ["Fast breathing for age"],
+          "action": "Give oral antibiotic for 5 days",
+          "thresholds": {
+            "2_12_months": "50+ breaths/min",
+            "12_months_5_years": "40+ breaths/min"
+          }
+        },
+        "no_pneumonia": {
+          "signs": ["No fast breathing", "No chest indrawing"],
+          "action": "Home care advice"
+        }
+      }
+    },
+
+    "diarrhea": {
+      "name": "Diarrhea",
+      "questions": [
+        "How long has the child had diarrhea?",
+        "Is there blood in the stool?"
+      ],
+      "examination": [
+        "Look at child's general condition",
+        "Look for sunken eyes",
+        "Offer fluid - observe drinking",
+        "Pinch skin of abdomen"
+      ],
+      "classifications": {
+        "severe_dehydration": {
+          "signs": ["Two or more: Lethargic/unconscious", "Sunken eyes", "Not able to drink", "Skin pinch very slow"],
+          "action": "REFER URGENTLY with ORS",
+          "pre_referral": ["Start IV or NG fluids immediately"]
+        },
+        "some_dehydration": {
+          "signs": ["Two or more: Restless/irritable", "Sunken eyes", "Drinks eagerly", "Skin pinch slow"],
+          "action": "Give ORS in clinic for 4 hours",
+          "treatment": "75ml/kg ORS over 4 hours"
+        },
+        "no_dehydration": {
+          "signs": ["Not enough signs for dehydration"],
+          "action": "Home treatment with ORS and zinc"
+        }
+      }
+    },
+
+    "fever": {
+      "name": "Fever",
+      "questions": [
+        "How long has the child had fever?",
+        "Has the child had measles in last 3 months?"
+      ],
+      "examination": [
+        "Look for stiff neck",
+        "Look for runny nose",
+        "Look for signs of measles"
+      ],
+      "malaria_area_actions": {
+        "high_risk": "Do malaria rapid test",
+        "positive_test": "Treat for malaria with ACT",
+        "negative_test": "Look for other causes"
+      },
+      "classifications": {
+        "very_severe_febrile_disease": {
+          "signs": ["Any danger sign", "Stiff neck", "Bulging fontanelle"],
+          "action": "REFER URGENTLY",
+          "pre_referral": ["First dose antibiotic", "Treat to prevent low blood sugar"]
+        },
+        "malaria": {
+          "signs": ["Positive malaria test OR high malaria risk + no other cause"],
+          "action": "Give ACT for 3 days"
+        }
+      }
+    },
+
+    "skin_problems": {
+      "name": "Skin Problems",
+      "examination": [
+        "Look for rash or skin lesions",
+        "Look for signs of infection",
+        "Check if spreading"
+      ],
+      "classifications": {
+        "severe_skin_infection": {
+          "signs": ["Spreading redness", "Pus", "Fever with skin infection"],
+          "action": "REFER or give antibiotic"
+        },
+        "skin_infection": {
+          "signs": ["Localized infection", "Sores"],
+          "action": "Treat with antibiotic ointment"
+        },
+        "fungal_infection": {
+          "signs": ["Ring-shaped rash", "Scaly patches"],
+          "action": "Apply antifungal cream"
+        },
+        "scabies": {
+          "signs": ["Itchy rash between fingers", "Multiple family members affected"],
+          "action": "Apply permethrin, treat all family members"
+        }
+      }
+    }
+  },
+
+  "referral_criteria": {
+    "immediate": [
+      "Any danger sign present",
+      "Severe classification",
+      "Young infant (0-2 months) with any illness",
+      "Child not improving after 2 days of treatment"
+    ],
+    "within_24_hours": [
+      "Persistent fever >7 days",
+      "Severe malnutrition",
+      "Blood in stool >14 days"
+    ]
+  },
+
+  "counseling_messages": {
+    "feeding": [
+      "Continue breastfeeding",
+      "Give extra fluids during illness",
+      "Encourage child to eat"
+    ],
+    "when_to_return": [
+      "Not able to drink or breastfeed",
+      "Becomes sicker",
+      "Has fever",
+      "Fast breathing",
+      "Blood in stool"
+    ],
+    "follow_up": {
+      "pneumonia": "2 days",
+      "diarrhea": "5 days if not improving",
+      "malaria": "3 days",
+      "skin_infection": "5 days"
+    }
+  }
+}

@@ -1,0 +1,86 @@
+name: medassist_chw
+description: MedAssist CHW - Edge-First AI Companion for Community Health Workers
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI & Navigation
+  go_router: ^13.0.0
+  flutter_riverpod: ^2.4.0
+  riverpod_annotation: ^2.3.0
+
+  # Local Database (Offline-first)
+  drift: ^2.14.0
+  sqlite3_flutter_libs: ^0.5.0
+  path_provider: ^2.1.0
+  path: ^1.8.0
+
+  # ML & AI Inference
+  tflite_flutter: ^0.10.4
+  google_mlkit_commons: ^0.7.0
+
+  # Image & Camera
+  camera: ^0.10.5
+  image: ^4.1.0
+  image_picker: ^1.0.0
+
+  # Audio Recording & Processing
+  record: ^5.0.0
+  just_audio: ^0.9.0
+  ffmpeg_kit_flutter_audio: ^6.0.0
+
+  # Networking & Sync
+  dio: ^5.4.0
+  connectivity_plus: ^5.0.0
+
+  # Utils
+  uuid: ^4.2.0
+  intl: ^0.18.0
+  collection: ^1.18.0
+  freezed_annotation: ^2.4.0
+  json_annotation: ^4.8.0
+  logger: ^2.0.0
+
+  # UI Components
+  flutter_svg: ^2.0.0
+  cached_network_image: ^3.3.0
+  shimmer: ^3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  build_runner: ^2.4.0
+  drift_dev: ^2.14.0
+  freezed: ^2.4.0
+  json_serializable: ^6.7.0
+  riverpod_generator: ^2.3.0
+  mockito: ^5.4.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/models/
+    - assets/protocols/
+    - assets/images/
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

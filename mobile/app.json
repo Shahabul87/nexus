@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "NEXUS",
+    "slug": "nexus-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a73e8"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nexus.maternalcare"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#1a73e8"
+      },
+      "package": "com.nexus.maternalcare",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./src/assets/favicon.png"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-av",
+      "expo-asset",
+      "expo-font"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:8000",
+      "version": "1.0.0",
+      "haiDefModels": {
+        "medsiglip": "MedSigLIP for image analysis",
+        "hear": "HeAR for audio analysis",
+        "medgemma": "MedGemma for clinical synthesis"
+      }
+    }
+  }
+}

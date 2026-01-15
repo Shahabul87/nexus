@@ -1,0 +1,203 @@
+{
+  "timestamp": "2026-01-14T15:12:17.269851",
+  "tests": {
+    "anemia": [
+      {
+        "image": "20200223_185602.jpg",
+        "is_anemic": false,
+        "confidence": 0.693976104259491,
+        "risk_level": "low",
+        "anemia_score": 0.3060239255428314
+      },
+      {
+        "image": "20200318_130225.jpg",
+        "is_anemic": false,
+        "confidence": 0.7437132000923157,
+        "risk_level": "low",
+        "anemia_score": 0.2562868297100067
+      },
+      {
+        "image": "20200219_201501.jpg",
+        "is_anemic": false,
+        "confidence": 0.763407289981842,
+        "risk_level": "low",
+        "anemia_score": 0.23659269511699677
+      },
+      {
+        "image": "20200312_183626.jpg",
+        "is_anemic": false,
+        "confidence": 0.6578750610351562,
+        "risk_level": "low",
+        "anemia_score": 0.34212490916252136
+      },
+      {
+        "image": "20200224_114700.jpg",
+        "is_anemic": false,
+        "confidence": 0.7066253423690796,
+        "risk_level": "low",
+        "anemia_score": 0.293374627828598
+      },
+      {
+        "image": "20200217_154641.jpg",
+        "is_anemic": false,
+        "confidence": 0.7528003454208374,
+        "risk_level": "low",
+        "anemia_score": 0.24719968438148499
+      },
+      {
+        "image": "20200224_115853.jpg",
+        "is_anemic": false,
+        "confidence": 0.6326574683189392,
+        "risk_level": "low",
+        "anemia_score": 0.3673425018787384
+      },
+      {
+        "image": "20200219_182849.jpg",
+        "is_anemic": false,
+        "confidence": 0.7691347599029541,
+        "risk_level": "low",
+        "anemia_score": 0.2308652251958847
+      },
+      {
+        "image": "20200213_153536.jpg",
+        "is_anemic": false,
+        "confidence": 0.6583280563354492,
+        "risk_level": "low",
+        "anemia_score": 0.3416719436645508
+      },
+      {
+        "image": "20200213_155456_001.jpg",
+        "is_anemic": false,
+        "confidence": 0.7334988117218018,
+        "risk_level": "low",
+        "anemia_score": 0.26650115847587585
+      }
+    ],
+    "jaundice": [
+      {
+        "image": "0669-1.jpg",
+        "has_jaundice": false,
+        "confidence": 0.9816292747855186,
+        "severity": "mild",
+        "estimated_bilirubin": 9.6
+      },
+      {
+        "image": "0432-3.jpg",
+        "has_jaundice": false,
+        "confidence": 0.8294629603624344,
+        "severity": "mild",
+        "estimated_bilirubin": 8.3
+      },
+      {
+        "image": "0477-3.jpg",
+        "has_jaundice": false,
+        "confidence": 0.6502672433853149,
+        "severity": "mild",
+        "estimated_bilirubin": 8.3
+      },
+      {
+        "image": "1101-1.jpg",
+        "has_jaundice": false,
+        "confidence": 0.7588958442211151,
+        "severity": "mild",
+        "estimated_bilirubin": 7.1
+      },
+      {
+        "image": "0964-2.jpg",
+        "has_jaundice": false,
+        "confidence": 0.7711962461471558,
+        "severity": "mild",
+        "estimated_bilirubin": 9.7
+      },
+      {
+        "image": "0127-2.jpg",
+        "has_jaundice": false,
+        "confidence": 0.7866744995117188,
+        "severity": "mild",
+        "estimated_bilirubin": 8.5
+      },
+      {
+        "image": "0101-1.jpg",
+        "has_jaundice": false,
+        "confidence": 0.8120254278182983,
+        "severity": "mild",
+        "estimated_bilirubin": 7.8
+      },
+      {
+        "image": "1162-2.jpg",
+        "has_jaundice": false,
+        "confidence": 0.8227634727954865,
+        "severity": "mild",
+        "estimated_bilirubin": 9.9
+      },
+      {
+        "image": "0144-1.jpg",
+        "has_jaundice": false,
+        "confidence": 0.6956453919410706,
+        "severity": "mild",
+        "estimated_bilirubin": 9.3
+      },
+      {
+        "image": "1127-2.jpg",
+        "has_jaundice": false,
+        "confidence": 0.6664620041847229,
+        "severity": "mild",
+        "estimated_bilirubin": 7.2
+      }
+    ],
+    "cry": [
+      {
+        "audio": "999bf14b-e417-4b44-b746-9253f81efe38-1430974001343-1.7-m-26-bp.wav",
+        "is_abnormal": true,
+        "asphyxia_risk": 0.6,
+        "cry_type": "discomfort"
+      },
+      {
+        "audio": "C421C6FE-DFEE-4080-8AEA-848E7CE4756B-1430548333-1.0-f-26-bp.wav",
+        "is_abnormal": true,
+        "asphyxia_risk": 0.8,
+        "cry_type": "pain"
+      },
+      {
+        "audio": "d6cda191-4962-4308-9a36-46d5648a95ed-1431159262344-1.7-m-04-bp.wav",
+        "is_abnormal": true,
+        "asphyxia_risk": 0.6,
+        "cry_type": "discomfort"
+      },
+      {
+        "audio": "643D64AD-B711-469A-AF69-55C0D5D3E30F-1430138524-1.0-m-72-bp.wav",
+        "is_abnormal": true,
+        "asphyxia_risk": 0.4,
+        "cry_type": "discomfort"
+      },
+      {
+        "audio": "643D64AD-B711-469A-AF69-55C0D5D3E30F-1430138647-1.0-m-72-bp.wav",
+        "is_abnormal": false,
+        "asphyxia_risk": 0.0,
+        "cry_type": "discomfort"
+      }
+    ],
+    "synthesizer": [
+      {
+        "scenario": "Healthy Patient",
+        "severity_level": "GREEN",
+        "referral_needed": false
+      },
+      {
+        "scenario": "Moderate Anemia",
+        "severity_level": "YELLOW",
+        "referral_needed": false
+      },
+      {
+        "scenario": "Severe Jaundice",
+        "severity_level": "RED",
+        "referral_needed": true
+      },
+      {
+        "scenario": "Multiple Concerns",
+        "severity_level": "RED",
+        "referral_needed": true
+      }
+    ]
+  }
+}
