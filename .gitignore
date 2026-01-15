@@ -1,11 +1,13 @@
-# Data files (too large for GitHub - download separately)
-data/raw/
+# Data files (using Git LFS for raw data)
 data/processed/
 data/embeddings/
-*.csv
 *.parquet
 *.h5
 *.hdf5
+
+# Nested git repos in datasets (must be excluded)
+data/raw/*/.git/
+data/raw/**/.git/
 
 # Model weights (too large for GitHub - retrain locally)
 models/checkpoints/*.pt
