@@ -30,20 +30,19 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
-# HeAR requires TensorFlow
+# HeAR PyTorch via HuggingFace
 try:
-    import tensorflow as tf
-    import tensorflow_hub as hub
-    HAS_TENSORFLOW = True
+    from transformers import AutoModel as HearAutoModel
+    HAS_HEAR_PYTORCH = True
 except ImportError:
-    HAS_TENSORFLOW = False
+    HAS_HEAR_PYTORCH = False
 
 
 class CryAnalyzer:
     """
     Analyzes infant cry audio for birth asphyxia detection using HeAR.
 
-    HAI-DEF Model: HeAR (google/hear)
+    HAI-DEF Model: HeAR (google/hear-pytorch)
     Method: Embedding extraction + linear classifier
     Expected Accuracy: 85-93% (per NEXUS_MASTER_PLAN.md)
 
@@ -65,8 +64,8 @@ class CryAnalyzer:
     ASPHYXIA_F0_THRESHOLD = 500   # Hz - higher F0 indicates distress
     MIN_CRY_DURATION = 0.5        # seconds
 
-    # HeAR model URL from TensorFlow Hub (Google Health)
-    HEAR_MODEL_URL = "https://tfhub.dev/google/hear/1"
+    # HeAR model ID on HuggingFace (PyTorch)
+    HEAR_MODEL_ID = "google/hear-pytorch"
 
     def __init__(
         self,
@@ -105,47 +104,31 @@ class CryAnalyzer:
         print(f"Cry Analyzer (HAI-DEF {mode}) initialized on {self.device}")
 
     def _load_hear_model(self) -> None:
-        """Load HeAR model from TensorFlow Hub.
+        """Load HeAR model from HuggingFace (PyTorch).
 
         HeAR (Health Acoustic Representations) is a Google HAI-DEF model
         for health-related audio analysis. It produces 512-dimensional
         embeddings from 2-second audio chunks at 16kHz.
         """
-        if not HAS_TENSORFLOW:
-            print("Warning: TensorFlow not available. Install with: pip install tensorflow tensorflow-hub")
+        if not HAS_HEAR_PYTORCH:
+            print("Warning: transformers not available. Install with: pip install transformers")
             print("Falling back to acoustic feature extraction (deterministic)")
             self._hear_available = False
             return
 
+        hf_token = os.environ.get("HF_TOKEN")
+
         try:
-            # Suppress TensorFlow warnings
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-            print(f"Loading HeAR model from TensorFlow Hub...")
-
-            # Load HeAR from TensorFlow Hub
-            # Note: HeAR may require specific TF versions. Try local path first.
-            local_hear_path = Path(__file__).parent.parent.parent / "models" / "hear"
-
-            if local_hear_path.exists():
-                print(f"Loading HeAR from local path: {local_hear_path}")
-                self.hear_model = tf.saved_model.load(str(local_hear_path))
-            else:
-                # Try TensorFlow Hub
-                print(f"Loading HeAR from TensorFlow Hub: {self.HEAR_MODEL_URL}")
-                try:
-                    self.hear_model = hub.load(self.HEAR_MODEL_URL)
-                except Exception as hub_error:
-                    # TFHub URL may not be correct - try alternate source
-                    print(f"TFHub load failed: {hub_error}")
-                    print("Note: HeAR model requires manual download from Google Health repo")
-                    print("See: https://github.com/Google-Health/google-health/tree/master/health_acoustic_representations")
-                    self.hear_model = None
-                    self._hear_available = False
-                    return
-
+            print(f"Loading HeAR model from HuggingFace: {self.HEAR_MODEL_ID}")
+            self.hear_model = HearAutoModel.from_pretrained(
+                self.HEAR_MODEL_ID,
+                token=hf_token,
+                trust_remote_code=True,
+            )
+            self.hear_model = self.hear_model.to(self.device)
+            self.hear_model.eval()
             self._hear_available = True
-            print("HeAR model loaded successfully")
+            print("HeAR model loaded successfully (PyTorch)")
 
         except Exception as e:
             print(f"Warning: Could not load HeAR model: {e}")
@@ -174,13 +157,17 @@ class CryAnalyzer:
 
     def extract_hear_embeddings(self, audio: np.ndarray) -> np.ndarray:
         """
-        Extract HeAR embeddings from audio.
+        Extract HeAR embeddings from audio using PyTorch.
+
+        HeAR is a ViT model that expects mel-PCEN spectrograms, not raw audio.
+        Pipeline: raw audio (32000 samples) → preprocess_audio() → (1, 1, 192, 128)
+                  → ViT forward pass → pool last_hidden_state → embedding
 
         Args:
             audio: Audio signal (16kHz)
 
         Returns:
-            Aggregated embedding (512-dim for HeAR, 8-dim for fallback)
+            Aggregated embedding (HeAR hidden_size dim, or 8-dim fallback)
         """
         if not self._hear_available or self.hear_model is None:
             # Fallback: use acoustic features as pseudo-embeddings
@@ -199,27 +186,41 @@ class CryAnalyzer:
             ])
             return feature_vector
 
+        from nexus.hear_preprocessing import preprocess_audio
+
         # Split into 2-second chunks for HeAR
         chunks = self._split_audio_chunks(audio)
 
-        # Extract embeddings for each chunk using HeAR
+        # Extract embeddings for each chunk using HeAR (PyTorch)
         embeddings = []
-        for chunk in chunks:
-            # HeAR expects audio as float32 tensor with shape [batch, samples]
-            chunk_tensor = tf.constant(chunk.astype(np.float32)[np.newaxis, :])
+        with torch.no_grad():
+            for chunk in chunks:
+                # Convert raw audio to tensor: (1, 32000)
+                chunk_tensor = torch.tensor(
+                    chunk.astype(np.float32)
+                ).unsqueeze(0).to(self.device)
 
-            # Call HeAR model - it returns embeddings of shape [batch, 512]
-            if hasattr(self.hear_model, '__call__'):
-                embedding = self.hear_model(chunk_tensor)
-            elif hasattr(self.hear_model, 'signatures'):
-                # For SavedModel format
-                infer = self.hear_model.signatures['serving_default']
-                result = infer(chunk_tensor)
-                embedding = list(result.values())[0]
-            else:
-                embedding = self.hear_model.encode(chunk_tensor)
+                # Preprocess: raw audio → mel-PCEN spectrogram (1, 1, 192, 128)
+                spectrogram = preprocess_audio(chunk_tensor)
 
-            embeddings.append(embedding.numpy().squeeze())
+                # Forward pass: HeAR ViT expects pixel_values
+                output = self.hear_model(
+                    pixel_values=spectrogram,
+                    return_dict=True,
+                )
+
+                # Extract embedding from ViT output
+                if hasattr(output, 'pooler_output') and output.pooler_output is not None:
+                    embedding = output.pooler_output
+                elif hasattr(output, 'last_hidden_state'):
+                    # Mean pool over sequence dimension (skip CLS token)
+                    embedding = output.last_hidden_state[:, 1:, :].mean(dim=1)
+                elif isinstance(output, torch.Tensor):
+                    embedding = output
+                else:
+                    embedding = list(output.values())[0] if hasattr(output, 'values') else output[0]
+
+                embeddings.append(embedding.cpu().numpy().squeeze())
 
         # Aggregate embeddings (mean pooling across chunks)
         aggregated = np.mean(embeddings, axis=0)

@@ -4,10 +4,11 @@ Anemia Detector Module
 Uses MedSigLIP from Google HAI-DEF for anemia detection from conjunctiva images.
 Implements zero-shot classification with medical text prompts per NEXUS_MASTER_PLAN.md.
 
-HAI-DEF Model: google/siglip-so400m-patch14-384 (MedSigLIP)
+HAI-DEF Model: google/medsiglip-448 (MedSigLIP)
 Documentation: https://developers.google.com/health-ai-developer-foundations/medsiglip
 """
 
+import os
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -23,9 +24,8 @@ except ImportError:
 
 # HAI-DEF MedSigLIP model IDs to try in order of preference
 MEDSIGLIP_MODEL_IDS = [
-    "google/siglip-so400m-patch14-384",  # MedSigLIP - primary HAI-DEF model
-    "google/siglip-base-patch16-384",     # SigLIP 384 - fallback
-    "google/siglip-base-patch16-224",     # SigLIP 224 - final fallback
+    "google/medsiglip-448",              # MedSigLIP - official HAI-DEF model
+    "google/siglip-base-patch16-224",    # SigLIP 224 - fallback
 ]
 
 
@@ -34,8 +34,8 @@ class AnemiaDetector:
     Detects anemia from conjunctiva (inner eyelid) images using MedSigLIP.
 
     Uses zero-shot classification with medical prompts for detection.
-    HAI-DEF Model: google/siglip-so400m-patch14-384 (MedSigLIP)
-    Fallbacks: siglip-base-patch16-384, siglip-base-patch16-224
+    HAI-DEF Model: google/medsiglip-448 (MedSigLIP)
+    Fallback: siglip-base-patch16-224
     Expected Accuracy: 85-98% (per NEXUS_MASTER_PLAN.md)
     """
 
@@ -77,12 +77,19 @@ class AnemiaDetector:
         # Determine which models to try
         models_to_try = [model_name] if model_name else MEDSIGLIP_MODEL_IDS
 
+        # HuggingFace token for gated models
+        hf_token = os.environ.get("HF_TOKEN")
+
         # Try loading models in order of preference
         for candidate_model in models_to_try:
             print(f"Loading HAI-DEF model: {candidate_model}")
             try:
-                self.processor = AutoProcessor.from_pretrained(candidate_model)
-                self.model = AutoModel.from_pretrained(candidate_model).to(self.device)
+                self.processor = AutoProcessor.from_pretrained(
+                    candidate_model, token=hf_token
+                )
+                self.model = AutoModel.from_pretrained(
+                    candidate_model, token=hf_token
+                ).to(self.device)
                 self.model_name = candidate_model
                 self._model_loaded = True
                 print(f"Successfully loaded: {candidate_model}")
@@ -103,7 +110,7 @@ class AnemiaDetector:
         self._precompute_text_embeddings()
 
         # Indicate which model variant is being used
-        is_medsiglip = "so400m" in self.model_name or "384" in self.model_name
+        is_medsiglip = "medsiglip" in self.model_name
         model_type = "MedSigLIP" if is_medsiglip else "SigLIP (fallback)"
         print(f"Anemia Detector (HAI-DEF {model_type}) initialized on {self.device}")
 
@@ -120,13 +127,18 @@ class AnemiaDetector:
                 truncation=True,
             ).to(self.device)
 
-            # Get text embeddings from SigLIP text encoder
+            # Get text embeddings - support multiple output APIs
             if hasattr(self.model, 'get_text_features'):
                 text_embeddings = self.model.get_text_features(**inputs)
             else:
-                # For SigLIP models that use text_model directly
-                text_outputs = self.model.text_model(**inputs)
-                text_embeddings = text_outputs.pooler_output
+                outputs = self.model(**inputs)
+                if hasattr(outputs, 'text_embeds'):
+                    text_embeddings = outputs.text_embeds
+                elif hasattr(outputs, 'text_model_output'):
+                    text_embeddings = outputs.text_model_output.pooler_output
+                else:
+                    text_outputs = self.model.text_model(**inputs)
+                    text_embeddings = text_outputs.pooler_output
 
             text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
 
@@ -185,13 +197,18 @@ class AnemiaDetector:
                 return_tensors="pt",
             ).to(self.device)
 
-            # Get image embeddings from SigLIP vision encoder
+            # Get image embeddings - support multiple output APIs
             if hasattr(self.model, 'get_image_features'):
                 image_embedding = self.model.get_image_features(**inputs)
             else:
-                # For SigLIP models that use vision_model directly
-                vision_outputs = self.model.vision_model(**inputs)
-                image_embedding = vision_outputs.pooler_output
+                outputs = self.model(**inputs)
+                if hasattr(outputs, 'image_embeds'):
+                    image_embedding = outputs.image_embeds
+                elif hasattr(outputs, 'vision_model_output'):
+                    image_embedding = outputs.vision_model_output.pooler_output
+                else:
+                    vision_outputs = self.model.vision_model(**inputs)
+                    image_embedding = vision_outputs.pooler_output
 
             image_embedding = image_embedding / image_embedding.norm(dim=-1, keepdim=True)
 
@@ -212,7 +229,7 @@ class AnemiaDetector:
             risk_level = "low"
             recommendation = "No immediate concern. Routine follow-up recommended."
 
-        is_medsiglip = "so400m" in self.model_name or "384" in self.model_name
+        is_medsiglip = "medsiglip" in self.model_name
         base_model = "MedSigLIP (HAI-DEF)" if is_medsiglip else "SigLIP (fallback)"
 
         return {
@@ -339,12 +356,18 @@ class AnemiaDetector:
                     padding=True,
                 ).to(self.device)
 
-                # Get image embeddings from SigLIP vision encoder
+                # Get image embeddings - support multiple output APIs
                 if hasattr(self.model, 'get_image_features'):
                     image_embeddings = self.model.get_image_features(**inputs)
                 else:
-                    vision_outputs = self.model.vision_model(**inputs)
-                    image_embeddings = vision_outputs.pooler_output
+                    outputs = self.model(**inputs)
+                    if hasattr(outputs, 'image_embeds'):
+                        image_embeddings = outputs.image_embeds
+                    elif hasattr(outputs, 'vision_model_output'):
+                        image_embeddings = outputs.vision_model_output.pooler_output
+                    else:
+                        vision_outputs = self.model.vision_model(**inputs)
+                        image_embeddings = vision_outputs.pooler_output
 
                 image_embeddings = image_embeddings / image_embeddings.norm(dim=-1, keepdim=True)
 

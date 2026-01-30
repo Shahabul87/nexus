@@ -58,9 +58,11 @@ app = FastAPI(
 )
 
 # CORS middleware for mobile app
+import os as _os
+_cors_origins = _os.environ.get("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,16 +83,15 @@ def _get_model_for_classifier_dimensions(n_features: int) -> str:
     """
     Get the model name that matches the classifier's expected feature dimensions.
 
-    Different SigLIP models produce different embedding sizes:
+    Different SigLIP/MedSigLIP models produce different embedding sizes:
+    - medsiglip-448: varies (check model card)
     - siglip-base-patch16-224: 768 features
-    - siglip-base-patch16-384: 768 features
-    - siglip-so400m-patch14-384: 1152 features
     """
     dimension_to_model = {
         768: "google/siglip-base-patch16-224",
-        1152: "google/siglip-so400m-patch14-384",
     }
-    return dimension_to_model.get(n_features)
+    # MedSigLIP-448 is the default for new probes - add its dimension when known
+    return dimension_to_model.get(n_features, "google/medsiglip-448")
 
 
 def _load_classifier_for_detector(detector, model_type: str) -> None:
@@ -543,30 +544,30 @@ async def combined_assessment(request: CombinedRequest):
             image_data = base64.b64decode(request.conjunctiva_image)
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp.write(image_data)
-                temp_files.append(tmp.name)
-                detector = get_anemia_detector()
-                result = detector.detect(tmp.name)
-                findings["anemia"] = result
+                tmp_path = tmp.name
+                temp_files.append(tmp_path)
+            detector = get_anemia_detector()
+            findings["anemia"] = detector.detect(tmp_path)
 
         # Analyze skin if provided
         if request.skin_image:
             image_data = base64.b64decode(request.skin_image)
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp.write(image_data)
-                temp_files.append(tmp.name)
-                detector = get_jaundice_detector()
-                result = detector.detect(tmp.name)
-                findings["jaundice"] = result
+                tmp_path = tmp.name
+                temp_files.append(tmp_path)
+            detector = get_jaundice_detector()
+            findings["jaundice"] = detector.detect(tmp_path)
 
         # Analyze cry if provided
         if request.cry_audio:
             audio_data = base64.b64decode(request.cry_audio)
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp.write(audio_data)
-                temp_files.append(tmp.name)
-                analyzer = get_cry_analyzer()
-                result = analyzer.analyze(tmp.name)
-                findings["cry"] = result
+                tmp_path = tmp.name
+                temp_files.append(tmp_path)
+            analyzer = get_cry_analyzer()
+            findings["cry"] = analyzer.analyze(tmp_path)
 
         # Clinical synthesis
         synthesizer = get_clinical_synthesizer()
@@ -651,14 +652,14 @@ async def get_models_info():
     if MODELS_AVAILABLE:
         try:
             if anemia_detector is not None:
-                anemia_model = getattr(anemia_detector, 'model_name', 'google/siglip-so400m-patch14-384')
+                anemia_model = getattr(anemia_detector, 'model_name', 'google/medsiglip-448')
             if jaundice_detector is not None:
-                jaundice_model = getattr(jaundice_detector, 'model_name', 'google/siglip-so400m-patch14-384')
+                jaundice_model = getattr(jaundice_detector, 'model_name', 'google/medsiglip-448')
             if cry_analyzer is not None:
-                cry_model = "HeAR" if getattr(cry_analyzer, '_hear_available', False) else "Acoustic Features"
+                cry_model = "HeAR (PyTorch)" if getattr(cry_analyzer, '_hear_available', False) else "Acoustic Features"
             if clinical_synthesizer is not None:
-                cry_model_attr = getattr(clinical_synthesizer, '_medgemma_available', False)
-                synthesizer_model = "MedGemma 4B" if cry_model_attr else "Rule-based (WHO IMNCI)"
+                medgemma_available = getattr(clinical_synthesizer, '_medgemma_available', False)
+                synthesizer_model = "MedGemma 4B" if medgemma_available else "Rule-based (WHO IMNCI)"
         except Exception:
             pass
 
@@ -666,9 +667,8 @@ async def get_models_info():
         "hai_def_models": {
             "medsiglip": {
                 "name": "MedSigLIP",
-                "version": "google/siglip-so400m-patch14-384",
+                "version": "google/medsiglip-448",
                 "fallback_versions": [
-                    "google/siglip-base-patch16-384",
                     "google/siglip-base-patch16-224"
                 ],
                 "loaded_model": anemia_model,
@@ -677,7 +677,7 @@ async def get_models_info():
             },
             "hear": {
                 "name": "HeAR",
-                "version": "google/hear (TensorFlow Hub)",
+                "version": "google/hear-pytorch",
                 "loaded_model": cry_model,
                 "use_cases": ["cry_analysis", "asphyxia_detection"],
                 "method": "health_acoustic_embeddings + linear_probe",
@@ -694,6 +694,33 @@ async def get_models_info():
         },
         "status": "operational" if MODELS_AVAILABLE else "models_not_loaded",
     }
+
+
+@app.get("/api/models/verify")
+async def verify_models():
+    """Verify which HAI-DEF models are actually loaded and operational."""
+    verification = {
+        "medsiglip": {
+            "loaded": anemia_detector is not None,
+            "model_name": getattr(anemia_detector, 'model_name', None) if anemia_detector else None,
+            "is_hai_def": "medsiglip" in getattr(anemia_detector, 'model_name', '') if anemia_detector else False,
+        },
+        "hear": {
+            "loaded": cry_analyzer is not None,
+            "hear_available": getattr(cry_analyzer, '_hear_available', False) if cry_analyzer else False,
+        },
+        "medgemma": {
+            "loaded": clinical_synthesizer is not None,
+            "medgemma_available": getattr(clinical_synthesizer, '_medgemma_available', False) if clinical_synthesizer else False,
+        },
+    }
+    all_hai_def = all([
+        verification["medsiglip"]["is_hai_def"],
+        verification["hear"]["hear_available"],
+        verification["medgemma"]["medgemma_available"],
+    ])
+    verification["all_hai_def_active"] = all_hai_def
+    return verification
 
 
 # WHO IMNCI Protocol Endpoint

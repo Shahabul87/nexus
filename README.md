@@ -95,11 +95,11 @@ Microphone → Cry Audio → HeAR Embeddings → Linear Classifier → Urgency S
 
 ## HAI-DEF Models Used
 
-| Model | Purpose | Usage |
-|-------|---------|-------|
-| **MedGemma 4B** | Clinical reasoning, synthesize findings | Agentic orchestration |
-| **MedSigLIP** | Medical image classification | Anemia + Jaundice detection |
-| **HeAR** | Health audio representation | Cry analysis for asphyxia |
+| Model | HuggingFace ID | Purpose | Usage |
+|-------|----------------|---------|-------|
+| **MedGemma 4B** | `google/medgemma-4b-it` | Clinical reasoning, synthesize findings | Agentic orchestration |
+| **MedSigLIP** | `google/medsiglip-448` | Medical image classification | Anemia + Jaundice detection |
+| **HeAR** | `google/hear-pytorch` | Health audio representation | Cry analysis for asphyxia |
 
 ## Technical Approach
 
@@ -146,6 +146,12 @@ source venv/bin/activate  # Linux/Mac
 # Install dependencies
 pip install -r requirements.txt
 
+# Set up HuggingFace token (required for gated HAI-DEF models)
+cp .env.example .env
+# Edit .env and set HF_TOKEN to your HuggingFace token
+# Get your token at: https://huggingface.co/settings/tokens
+export HF_TOKEN=hf_your_token_here
+
 # Download datasets
 python scripts/download_datasets.py
 
@@ -155,6 +161,16 @@ python scripts/prepare_datasets.py
 # Run validation
 python scripts/validate_models.py
 ```
+
+### HuggingFace Token Setup
+
+MedGemma and MedSigLIP are gated models that require HuggingFace authentication:
+
+1. Create an account at [huggingface.co](https://huggingface.co)
+2. Accept the model license for [google/medgemma-4b-it](https://huggingface.co/google/medgemma-4b-it)
+3. Accept the model license for [google/medsiglip-448](https://huggingface.co/google/medsiglip-448)
+4. Generate a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+5. Set the token: `export HF_TOKEN=hf_your_token`
 
 ### Running the Demo
 

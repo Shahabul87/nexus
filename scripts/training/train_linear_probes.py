@@ -37,15 +37,32 @@ except ImportError:
 class EmbeddingExtractor:
     """Extract embeddings from MedSigLIP model."""
 
-    def __init__(self, model_name: str = "google/siglip-base-patch16-224", device: str = None):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_name = model_name
+    FALLBACK_MODELS = [
+        "google/medsiglip-448",           # MedSigLIP - official HAI-DEF (gated)
+        "google/siglip-base-patch16-224",  # SigLIP - public fallback
+    ]
 
-        print(f"Loading MedSigLIP model: {model_name}")
-        self.processor = AutoProcessor.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(self.device)
-        self.model.eval()
-        print(f"Model loaded on {self.device}")
+    def __init__(self, model_name: str = None, device: str = None):
+        import os
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        hf_token = os.environ.get("HF_TOKEN")
+
+        candidates = [model_name] if model_name else self.FALLBACK_MODELS
+        for candidate in candidates:
+            try:
+                print(f"Loading model: {candidate}")
+                self.processor = AutoProcessor.from_pretrained(candidate, token=hf_token)
+                self.model = AutoModel.from_pretrained(candidate, token=hf_token).to(self.device)
+                self.model.eval()
+                self.model_name = candidate
+                print(f"Model loaded on {self.device}")
+                return
+            except (OSError, Exception) as e:
+                print(f"Cannot load {candidate}: {e}")
+                if candidate != candidates[-1]:
+                    print("Trying next fallback...")
+                continue
+        raise RuntimeError(f"Failed to load any model from: {candidates}")
 
     def extract_image_embedding(self, image_path: Path) -> np.ndarray:
         """Extract embedding for a single image."""
@@ -57,8 +74,14 @@ class EmbeddingExtractor:
             if hasattr(self.model, 'get_image_features'):
                 embedding = self.model.get_image_features(**inputs)
             else:
-                vision_outputs = self.model.vision_model(**inputs)
-                embedding = vision_outputs.pooler_output
+                outputs = self.model(**inputs)
+                if hasattr(outputs, 'image_embeds'):
+                    embedding = outputs.image_embeds
+                elif hasattr(outputs, 'vision_model_output'):
+                    embedding = outputs.vision_model_output.pooler_output
+                else:
+                    vision_outputs = self.model.vision_model(**inputs)
+                    embedding = vision_outputs.pooler_output
 
             embedding = embedding / embedding.norm(dim=-1, keepdim=True)
 
@@ -78,8 +101,14 @@ class EmbeddingExtractor:
                 if hasattr(self.model, 'get_image_features'):
                     embeddings = self.model.get_image_features(**inputs)
                 else:
-                    vision_outputs = self.model.vision_model(**inputs)
-                    embeddings = vision_outputs.pooler_output
+                    outputs = self.model(**inputs)
+                    if hasattr(outputs, 'image_embeds'):
+                        embeddings = outputs.image_embeds
+                    elif hasattr(outputs, 'vision_model_output'):
+                        embeddings = outputs.vision_model_output.pooler_output
+                    else:
+                        vision_outputs = self.model.vision_model(**inputs)
+                        embeddings = vision_outputs.pooler_output
 
                 embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
 

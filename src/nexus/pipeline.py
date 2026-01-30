@@ -89,6 +89,49 @@ class NEXUSPipeline:
 
         print("NEXUS Pipeline initialized")
 
+    def verify_hai_def_compliance(self) -> Dict:
+        """
+        Verify which HAI-DEF models are loaded and report compliance.
+
+        Returns:
+            Dictionary with model status and compliance flag.
+        """
+        from .anemia_detector import MEDSIGLIP_MODEL_IDS
+        from .cry_analyzer import CryAnalyzer
+
+        status = {
+            "medsiglip": {
+                "expected": "google/medsiglip-448",
+                "configured_models": MEDSIGLIP_MODEL_IDS,
+                "anemia_loaded": self._anemia_detector is not None,
+                "jaundice_loaded": self._jaundice_detector is not None,
+            },
+            "hear": {
+                "expected": CryAnalyzer.HEAR_MODEL_ID,
+                "cry_loaded": self._cry_analyzer is not None,
+                "hear_active": getattr(self._cry_analyzer, '_hear_available', False) if self._cry_analyzer else False,
+            },
+            "medgemma": {
+                "expected": "google/medgemma-4b-it",
+            },
+        }
+
+        # Check loaded model names
+        if self._anemia_detector:
+            status["medsiglip"]["anemia_model"] = getattr(self._anemia_detector, 'model_name', 'unknown')
+        if self._jaundice_detector:
+            status["medsiglip"]["jaundice_model"] = getattr(self._jaundice_detector, 'model_name', 'unknown')
+
+        # Overall compliance
+        anemia_ok = "medsiglip" in status["medsiglip"].get("anemia_model", "")
+        jaundice_ok = "medsiglip" in status["medsiglip"].get("jaundice_model", "")
+        hear_ok = status["hear"]["hear_active"]
+
+        status["compliant"] = anemia_ok or jaundice_ok or hear_ok
+        status["all_hai_def"] = anemia_ok and jaundice_ok and hear_ok
+
+        return status
+
     def _auto_detect_checkpoints(self) -> None:
         """Auto-detect trained checkpoints from default directories."""
         # Check for linear probes (.joblib sklearn models)

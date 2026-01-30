@@ -5,14 +5,14 @@
 torch>=2.1.0
 torchvision>=0.16.0
 torchaudio>=2.1.0
-transformers>=4.36.0
+transformers>=4.44.0
 accelerate>=0.25.0
 bitsandbytes>=0.41.0
 safetensors>=0.4.0
 sentencepiece>=0.1.99
 
-# HAI-DEF Models
-google-cloud-aiplatform>=1.38.0
+# HAI-DEF Models (HuggingFace)
+huggingface_hub>=0.20.0
 
 # Model Optimization (Edge Deployment)
 onnx>=1.15.0

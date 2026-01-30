@@ -376,6 +376,63 @@ class TestPipelineIntegration(unittest.TestCase):
             self.skipTest(f"Pipeline initialization failed: {e}")
 
 
+class TestHAIDEFCompliance(unittest.TestCase):
+    """Tests for HAI-DEF model compliance.
+
+    Verifies that the codebase references correct HAI-DEF model IDs
+    and does not use legacy/incorrect model identifiers.
+    """
+
+    def test_anemia_detector_uses_medsiglip(self):
+        """Test that anemia detector uses google/medsiglip-448 as primary model."""
+        from nexus.anemia_detector import MEDSIGLIP_MODEL_IDS
+        self.assertEqual(MEDSIGLIP_MODEL_IDS[0], "google/medsiglip-448")
+
+    def test_jaundice_detector_uses_medsiglip(self):
+        """Test that jaundice detector uses google/medsiglip-448 as primary model."""
+        from nexus.jaundice_detector import MEDSIGLIP_MODEL_IDS
+        self.assertEqual(MEDSIGLIP_MODEL_IDS[0], "google/medsiglip-448")
+
+    def test_cry_analyzer_uses_hear_pytorch(self):
+        """Test that cry analyzer uses google/hear-pytorch model ID."""
+        from nexus.cry_analyzer import CryAnalyzer
+        self.assertEqual(CryAnalyzer.HEAR_MODEL_ID, "google/hear-pytorch")
+
+    def test_no_legacy_siglip_model_ids(self):
+        """Test that legacy siglip-so400m model ID is not used."""
+        from nexus.anemia_detector import MEDSIGLIP_MODEL_IDS as anemia_ids
+        from nexus.jaundice_detector import MEDSIGLIP_MODEL_IDS as jaundice_ids
+        for model_id in anemia_ids + jaundice_ids:
+            self.assertNotIn("so400m", model_id, f"Legacy model ID found: {model_id}")
+
+    def test_no_tensorflow_in_cry_analyzer(self):
+        """Test that cry_analyzer.py does not import tensorflow."""
+        import inspect
+        from nexus import cry_analyzer
+        source = inspect.getsource(cry_analyzer)
+        self.assertNotIn("import tensorflow", source)
+        self.assertNotIn("tensorflow_hub", source)
+
+    def test_no_tfhub_url_in_cry_analyzer(self):
+        """Test that cry_analyzer.py does not reference tfhub.dev."""
+        import inspect
+        from nexus import cry_analyzer
+        source = inspect.getsource(cry_analyzer)
+        self.assertNotIn("tfhub.dev", source)
+
+    def test_pipeline_has_compliance_method(self):
+        """Test that pipeline has verify_hai_def_compliance method."""
+        from nexus.pipeline import NEXUSPipeline
+        pipeline = NEXUSPipeline(lazy_load=True, use_linear_probes=False)
+        self.assertTrue(hasattr(pipeline, 'verify_hai_def_compliance'))
+
+    def test_clinical_synthesizer_model_name(self):
+        """Test that clinical synthesizer uses google/medgemma-4b-it."""
+        from nexus.clinical_synthesizer import ClinicalSynthesizer
+        synthesizer = ClinicalSynthesizer(use_medgemma=False)
+        self.assertEqual(synthesizer.model_name, "google/medgemma-4b-it")
+
+
 if __name__ == '__main__':
     # Run tests with verbosity
     print("="*60)

@@ -143,6 +143,27 @@ class TestModelsEndpoint:
         assert "hear" in data["hai_def_models"]
         assert "medgemma" in data["hai_def_models"]
 
+    def test_models_report_correct_hai_def_ids(self):
+        """Test that /api/models reports correct HAI-DEF model IDs."""
+        response = client.get("/api/models")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["hai_def_models"]["medsiglip"]["version"] == "google/medsiglip-448"
+        assert data["hai_def_models"]["hear"]["version"] == "google/hear-pytorch"
+        assert data["hai_def_models"]["medgemma"]["version"] == "google/medgemma-4b-it"
+
+    def test_verify_models_endpoint(self):
+        """Test the /api/models/verify endpoint exists and responds."""
+        response = client.get("/api/models/verify")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "medsiglip" in data
+        assert "hear" in data
+        assert "medgemma" in data
+        assert "all_hai_def_active" in data
+
 
 class TestAnemiaEndpoint:
     """Tests for the /api/anemia/detect endpoint."""

@@ -59,6 +59,7 @@ class ClinicalSynthesizer:
         self.model = None
         self.tokenizer = None
         self.use_medgemma = use_medgemma
+        self._medgemma_available = False
 
         if use_medgemma and HAS_TRANSFORMERS:
             self._load_medgemma()
@@ -70,16 +71,26 @@ class ClinicalSynthesizer:
 
     def _load_medgemma(self) -> None:
         """Load MedGemma model from HuggingFace."""
+        import os
+        hf_token = os.environ.get("HF_TOKEN")
+        if not hf_token:
+            print("Warning: HF_TOKEN not set. MedGemma is a gated model and requires authentication.")
+            print("Set HF_TOKEN environment variable with your HuggingFace token.")
+
         try:
             print(f"Loading MedGemma model: {self.model_name}")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name, token=hf_token
+            )
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
+                token=hf_token,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 device_map="auto" if self.device == "cuda" else None,
             )
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
+            self._medgemma_available = True
             print("MedGemma loaded successfully")
         except Exception as e:
             print(f"Warning: Could not load MedGemma: {e}")
@@ -87,6 +98,7 @@ class ClinicalSynthesizer:
             self.model = None
             self.tokenizer = None
             self.use_medgemma = False
+            self._medgemma_available = False
 
     def _build_prompt(self, findings: Dict) -> str:
         """

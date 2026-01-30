@@ -95,23 +95,25 @@ def load_cry_analyzer():
 @st.cache_resource
 def load_clinical_synthesizer():
     """Load clinical synthesizer (MedGemma)."""
+    import os
     from nexus.clinical_synthesizer import ClinicalSynthesizer
-    return ClinicalSynthesizer(use_medgemma=False)  # Rule-based for demo speed
+    use_medgemma = os.environ.get("NEXUS_USE_MEDGEMMA", "true").lower() != "false"
+    return ClinicalSynthesizer(use_medgemma=use_medgemma)
 
 
 def get_hai_def_info():
     """Get HAI-DEF models information."""
     return {
         "MedSigLIP": {
-            "name": "MedSigLIP (google/siglip-base-patch16-224)",
+            "name": "MedSigLIP (google/medsiglip-448)",
             "use": "Image analysis for anemia and jaundice detection",
             "method": "Zero-shot classification with medical prompts",
             "accuracy": "80-98% expected"
         },
         "HeAR": {
-            "name": "HeAR (Health Acoustic Representations)",
+            "name": "HeAR (google/hear-pytorch)",
             "use": "Infant cry analysis for asphyxia detection",
-            "method": "Acoustic feature extraction + classification",
+            "method": "Health acoustic embeddings + classification",
             "accuracy": "85-93% expected"
         },
         "MedGemma": {
@@ -580,7 +582,7 @@ def render_hai_def_info():
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown("### 🖼️ MedSigLIP")
-        st.image("https://via.placeholder.com/200x150?text=MedSigLIP", use_container_width=True)
+        st.info("google/medsiglip-448\n\nHAI-DEF Vision Model")
     with col2:
         info = hai_def["MedSigLIP"]
         st.markdown(f"**Model**: {info['name']}")
@@ -598,7 +600,7 @@ def render_hai_def_info():
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown("### 🔊 HeAR")
-        st.image("https://via.placeholder.com/200x150?text=HeAR", use_container_width=True)
+        st.info("google/hear-pytorch\n\nHAI-DEF Audio Model")
     with col2:
         info = hai_def["HeAR"]
         st.markdown(f"**Model**: {info['name']}")
@@ -616,7 +618,7 @@ def render_hai_def_info():
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown("### 🧠 MedGemma")
-        st.image("https://via.placeholder.com/200x150?text=MedGemma", use_container_width=True)
+        st.info("google/medgemma-4b-it\n\nHAI-DEF Language Model")
     with col2:
         info = hai_def["MedGemma"]
         st.markdown(f"**Model**: {info['name']}")

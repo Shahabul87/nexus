@@ -19,9 +19,9 @@
 
 | Model | Task | HuggingFace ID | Status |
 |-------|------|----------------|--------|
-| **MedGemma** | Clinical reasoning & synthesis | `google/medgemma-4b-it` | INTEGRATED |
-| **MedSigLIP** | Anemia & jaundice detection | `google/siglip-base-patch16-224` | INTEGRATED |
-| **HeAR** | Cry analysis (birth asphyxia) | `google/hear` | INTEGRATED (fallback to acoustic features) |
+| **MedGemma** | Clinical reasoning & synthesis | `google/medgemma-4b-it` | INTEGRATED (HF token required) |
+| **MedSigLIP** | Anemia & jaundice detection | `google/medsiglip-448` | INTEGRATED (HF token required) |
+| **HeAR** | Cry analysis (birth asphyxia) | `google/hear-pytorch` | INTEGRATED (PyTorch, with acoustic fallback) |
 
 ### DO NOT USE
 - `openai/clip-vit-base-patch32` - REPLACED
@@ -33,16 +33,16 @@
 
 ### Completed: MedSigLIP for Image Analysis
 **Files updated:**
-- `src/nexus/anemia_detector.py` - Now uses `google/siglip-base-patch16-224`
-- `src/nexus/jaundice_detector.py` - Now uses `google/siglip-base-patch16-224`
+- `src/nexus/anemia_detector.py` - Uses `google/medsiglip-448` (with `google/siglip-base-patch16-224` fallback)
+- `src/nexus/jaundice_detector.py` - Uses `google/medsiglip-448` (with `google/siglip-base-patch16-224` fallback)
 
 ### Completed: HeAR for Cry Analysis
 **File updated:**
-- `src/nexus/cry_analyzer.py` - HeAR integration with acoustic feature fallback
+- `src/nexus/cry_analyzer.py` - Uses `google/hear-pytorch` via HuggingFace (PyTorch, with acoustic feature fallback)
 
 ### Completed: MedGemma for Clinical Reasoning
-**New file created:**
-- `src/nexus/clinical_synthesizer.py` - Uses `google/medgemma-4b-it` with rule-based fallback
+**File updated:**
+- `src/nexus/clinical_synthesizer.py` - Uses `google/medgemma-4b-it` with HF token auth and rule-based fallback
 
 ---
 
@@ -104,10 +104,10 @@ NEXUS Platform
 ## CURRENT STATUS
 
 ### HAI-DEF Models Integrated
-- `src/nexus/anemia_detector.py` - MedSigLIP (google/siglip-base-patch16-224)
-- `src/nexus/jaundice_detector.py` - MedSigLIP (google/siglip-base-patch16-224)
-- `src/nexus/cry_analyzer.py` - HeAR (with acoustic feature fallback)
-- `src/nexus/clinical_synthesizer.py` - MedGemma 4B (with rule-based fallback)
+- `src/nexus/anemia_detector.py` - MedSigLIP (`google/medsiglip-448`)
+- `src/nexus/jaundice_detector.py` - MedSigLIP (`google/medsiglip-448`)
+- `src/nexus/cry_analyzer.py` - HeAR (`google/hear-pytorch`) with acoustic feature fallback
+- `src/nexus/clinical_synthesizer.py` - MedGemma 4B (`google/medgemma-4b-it`) with rule-based fallback
 
 ### Linear Probes Trained (Jan 14, 2026)
 - **Anemia Linear Probe**: 52.27% accuracy (data labels are pseudo-labels)
