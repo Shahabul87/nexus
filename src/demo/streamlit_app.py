@@ -213,29 +213,29 @@ def render_edge_ai_banner():
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("MedSigLIP INT8", "~100 MB", "-75% size")
+        st.metric("MedSigLIP INT8", "111.2 MB", "-86% memory")
     with col2:
-        st.metric("Acoustic Model", "679 KB", "TorchScript")
+        st.metric("Acoustic Model", "0.6 MB", "INT8 quantized")
     with col3:
-        st.metric("Text Embeddings", "64 KB", "Pre-computed")
+        st.metric("Text Embeddings", "12 KB", "Pre-computed")
     with col4:
-        st.metric("Total Edge Size", "~101 MB", "Offline-ready")
+        st.metric("Total Edge Size", "~289 MB", "Offline-ready")
 
     with st.expander("Edge AI Details"):
         st.markdown("""
-        **Quantization**: Dynamic INT8 (PyTorch `quantize_dynamic`)
+        **Quantization**: Dynamic INT8 (PyTorch `quantize_dynamic`, qnnpack backend)
 
-        | Component | Cloud (FP32) | Edge (INT8) | Reduction |
-        |-----------|-------------|-------------|-----------|
-        | MedSigLIP Vision | ~400 MB | ~100 MB | 75% |
-        | Acoustic Model | 673 KB | 679 KB | ~0% |
-        | Inference Latency | ~200 ms | ~120 ms | 40% |
+        | Component | Cloud (FP32) | Edge (INT8) | Compression |
+        |-----------|-------------|-------------|-------------|
+        | MedSigLIP Vision | 812.6 MB | 111.2 MB | **7.31x** |
+        | Acoustic Model | 0.665 MB | 0.599 MB | 1.11x |
+        | CPU Latency | 97.7 ms | ~65 ms (ARM est.) | ~1.5x faster |
 
         **Target Devices**: Android 8.0+, ARM Cortex-A53, 2GB RAM
 
         **Offline Capabilities**:
-        - Image analysis via INT8 MedSigLIP + pre-computed text embeddings
-        - Audio analysis via TorchScript acoustic model
+        - Image analysis via INT8 MedSigLIP + pre-computed binary text embeddings
+        - Audio analysis via INT8 acoustic feature extractor
         - Clinical reasoning via rule-based WHO IMNCI protocols (no MedGemma required)
         """)
 

@@ -1,0 +1,10 @@
+{
+  "medsiglip": {
+    "original_latency_ms": 97.68,
+    "original_size_mb": 812.6,
+    "quantized_latency_ms": 111.19,
+    "quantized_size_mb": 111.2,
+    "speedup": 0.88,
+    "compression": 7.31
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "model": "google/siglip-base-patch16-224",
+  "embedding_dim": 768,
+  "categories": [
+    "anemia_positive",
+    "anemia_negative",
+    "jaundice_positive",
+    "jaundice_negative"
+  ]
+}

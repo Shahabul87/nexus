@@ -147,13 +147,28 @@ NEXUS Platform
 - [x] Competition writeup rewritten (`submission/writeup.md`)
 - [x] Video script updated (`submission/video/DEMO_VIDEO_SCRIPT.md`)
 - [x] README.md updated with architecture, setup, and structure
+- [x] Bilirubin regression trained: MAE=2.667 mg/dL, Pearson r=0.7725
+- [x] Edge quantization complete: MedSigLIP 7.31x compression (812.6→111.2 MB)
+- [x] Text embeddings exported: 4 categories, 768-dim binary files
+- [x] All benchmarks updated with real data
+
+### Bilirubin Regression Results (Jan 30, 2026)
+- **MAE**: 2.667 mg/dL
+- **RMSE**: 3.402 mg/dL
+- **Pearson r**: 0.7725 (p < 1e-67)
+- **Bland-Altman**: mean bias 0.217, 95% LoA [-6.4, 6.9]
+- **Model**: `models/linear_probes/bilirubin_regressor.pt` (1.2 MB)
+
+### Edge Quantization Results (Jan 30, 2026)
+- **MedSigLIP INT8**: 812.6 MB → 111.2 MB memory (7.31x), 287.4 MB on disk
+- **Acoustic INT8**: 0.665 MB → 0.599 MB (1.11x)
+- **CPU latency**: 97.68 ms (FP32) vs 111.19 ms (INT8, macOS qnnpack)
+- **Text embeddings**: 4 x 768-dim binary files (12 KB total)
 
 ### Remaining Before Submission
-1. Run bilirubin regression training with HF_TOKEN
-2. Run edge quantization scripts with HF_TOKEN
-3. Deploy to HuggingFace Spaces
-4. Record 3-minute video demo
-5. Submit on Kaggle
+1. Deploy to HuggingFace Spaces
+2. Record 3-minute video demo
+3. Submit on Kaggle
 
 ---
 

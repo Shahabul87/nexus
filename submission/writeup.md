@@ -48,7 +48,9 @@ Each agent emits structured results with reasoning chains, confidence scores, an
 
 ### Novel Task: Bilirubin Regression
 
-We fine-tuned a **2-layer MLP regression head** on frozen MedSigLIP embeddings to predict continuous bilirubin levels (mg/dL) from neonatal skin images -- a novel application beyond MedSigLIP's original zero-shot classification design. Trained on 2,235 images from the NeoJaundice dataset with ground truth serum bilirubin measurements.
+We fine-tuned a **2-layer MLP regression head** (1152→256→1, 295K params) on frozen MedSigLIP embeddings to predict continuous bilirubin levels (mg/dL) from neonatal skin images -- a novel application beyond MedSigLIP's original zero-shot classification design. Trained on 2,235 images from the NeoJaundice dataset with ground truth serum bilirubin measurements.
+
+**Results**: MAE = **2.667 mg/dL**, RMSE = 3.402, Pearson r = **0.7725** (p < 1e-67). Bland-Altman analysis shows mean bias of 0.217 mg/dL with 95% limits of agreement [-6.4, 6.9].
 
 ---
 
@@ -67,17 +69,18 @@ We fine-tuned a **2-layer MLP regression head** on frozen MedSigLIP embeddings t
 |------|--------|--------|
 | Anemia classification | MedSigLIP zero-shot + linear probe | 52.27% accuracy (pseudo-labels) |
 | Jaundice classification | MedSigLIP zero-shot + linear probe | 68.90% accuracy |
-| Bilirubin regression | MedSigLIP embeddings + MLP | MAE / Pearson r (see notebook) |
+| Bilirubin regression | MedSigLIP embeddings + MLP | MAE: 2.667 mg/dL, r=0.77 |
 | Cry analysis | HeAR embeddings + acoustic features | Qualitative assessment |
 | Clinical synthesis | MedGemma 4B-it | WHO IMNCI-aligned recommendations |
 
 ### Edge Deployment
 
-| Component | Cloud Size | Edge Size | Reduction |
-|-----------|-----------|-----------|-----------|
-| MedSigLIP vision encoder | ~400 MB | ~100 MB (INT8) | 75% |
-| Acoustic model | 673 KB | 679 KB (TorchScript) | ~0% |
-| Total on-device | - | ~101 MB | Offline-ready |
+| Component | Cloud Size | Edge Size | Compression |
+|-----------|-----------|-----------|-------------|
+| MedSigLIP vision encoder | 812.6 MB | 111.2 MB (INT8) | **7.31x** |
+| Acoustic model | 0.665 MB | 0.599 MB (INT8) | 1.11x |
+| Text embeddings | Computed | 12 KB (pre-computed) | Offline-ready |
+| Total on-device | - | ~289 MB | Offline-ready |
 
 Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
 

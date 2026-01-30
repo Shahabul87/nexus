@@ -23,6 +23,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+# Use qnnpack backend on macOS/ARM (fbgemm not available)
+if not torch.backends.quantized.engine == "fbgemm":
+    torch.backends.quantized.engine = "qnnpack"
+
 try:
     from transformers import AutoProcessor, AutoModel
     HAS_TRANSFORMERS = True
