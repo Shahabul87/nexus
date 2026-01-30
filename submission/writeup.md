@@ -1,86 +1,54 @@
-# MedAssist CHW
+# NEXUS: AI-Powered Maternal-Neonatal Assessment Platform
 
 ## Project Name
-**MedAssist CHW** - Edge-First AI Companion for Community Health Workers
+**NEXUS** - Non-invasive EXamination Utility System
 
 ## Your Team
 
 | Name | Specialty | Role |
 |------|-----------|------|
-| [Your Name] | Machine Learning | Lead Developer, Model Optimization |
-| [Team Member 2] | Mobile Development | React Native App Development |
-| [Team Member 3] | Healthcare/Clinical | Domain Expert, Protocol Design |
+| Md Shahabul Alam | Machine Learning | Model integration, agentic architecture, edge optimization |
 
 ---
 
 ## Problem Statement
 
-### The Challenge
+Every day, **800 women** die from pregnancy-related complications and **7,400 newborns** do not survive their first month. 94% of these deaths occur in low-resource settings where diagnostic tools are scarce but smartphones are increasingly available.
 
-Community Health Workers (CHWs) are the backbone of healthcare delivery in low-resource settings, serving **6.9 million people globally**. Yet they face critical challenges:
+**6.9 million Community Health Workers (CHWs)** form the backbone of primary healthcare delivery in these regions, yet they lack clinical decision support for three critical conditions:
 
-- **Limited Training**: 2-12 weeks vs. years for physicians
-- **No Diagnostic Support**: Make complex decisions without specialist backup
-- **Connectivity Issues**: Work in areas with intermittent/no internet
-- **Protocol Complexity**: Difficulty following WHO/local clinical guidelines
+- **Maternal anemia** affects 40% of pregnancies globally. Detection requires blood tests unavailable at community level.
+- **Neonatal jaundice** affects 60% of newborns. Delayed detection causes irreversible brain damage (kernicterus).
+- **Birth asphyxia** accounts for 23% of neonatal deaths. Early warning signs in infant cry patterns go unrecognized.
 
-### The Magnitude
-
-- **10 million** healthcare worker shortage projected by 2030 (WHO)
-- Sub-Saharan Africa has **3%** of healthcare workers but **24%** of disease burden
-- Rural areas have **5.1 vs 8.0** physicians per 10,000 compared to urban
-
-### Impact Potential
-
-If deployed to just **10%** of CHWs globally:
-- **690,000** health workers empowered
-- **~500 million** patient interactions improved annually
-- Estimated **38% reduction** in preventable deaths (based on m-mama program data)
-- **$2.3 billion** saved in unnecessary referrals
+**Impact potential**: If deployed to 10% of CHWs globally, NEXUS would empower 690,000 health workers across ~500 million patient interactions annually.
 
 ---
 
 ## Overall Solution
 
-### Effective Use of HAI-DEF Models
+NEXUS integrates **3 HAI-DEF models** in a multi-agent clinical workflow that transforms a smartphone into a diagnostic screening tool:
 
-MedAssist CHW integrates **5 HAI-DEF models** in a novel multi-modal, agentic architecture:
+| HAI-DEF Model | Use Case | Integration |
+|---------------|----------|-------------|
+| **MedSigLIP** (`google/medsiglip-448`) | Anemia detection from conjunctiva images; jaundice detection and bilirubin regression from skin images | Zero-shot classification + trained linear probes + novel bilirubin regression head |
+| **HeAR** (`google/hear-pytorch`) | Birth asphyxia screening from infant cry recordings | Audio embeddings with acoustic feature fallback |
+| **MedGemma** (`google/medgemma-4b-it`) | Clinical reasoning and synthesis of multi-modal findings | Structured prompt with agent reasoning traces |
 
-| Model | Use Case | Why HAI-DEF is Essential |
-|-------|----------|-------------------------|
-| **MedGemma 4B** | Clinical reasoning, protocol guidance | Medical-specific reasoning unavailable in general LLMs |
-| **MedSigLIP** | Rapid image classification | Zero-shot medical image understanding |
-| **HeAR** | Cough/respiratory analysis | Health-specific audio representations |
-| **Derm Foundation** | Skin condition assessment | Dermatology-trained embeddings |
-| **CXR Foundation** | Chest X-ray interpretation | Radiology-specific features |
+### Agentic Clinical Workflow
 
-### Multi-Model Orchestration
+NEXUS uses a **6-agent sequential pipeline** where each agent produces step-by-step reasoning traces, creating a full audit trail:
 
 ```
-Patient Encounter
-       |
-       v
-[TriageAgent: MedGemma] --> Routes to appropriate specialists
-       |
-       +---> Skin? --> [Derm Foundation + MedSigLIP]
-       +---> Respiratory? --> [HeAR + MedGemma]
-       +---> X-ray? --> [CXR Foundation]
-       |
-       v
-[SynthesizerAgent: MedGemma] --> Multi-modal reasoning
-       |
-       v
-[ProtocolAgent] --> WHO IMNCI + local guidelines
-       |
-       v
-[ReferralAgent] --> Severity scoring + facility matching
+Triage -> Image Analysis (MedSigLIP) -> Audio Analysis (HeAR)
+  -> WHO Protocol -> Referral Decision -> Clinical Synthesis (MedGemma)
 ```
 
-### Why Other Solutions Would Be Less Effective
+Each agent emits structured results with reasoning chains, confidence scores, and processing times. Critical danger signs trigger early-exit to immediate referral. The workflow follows WHO IMNCI protocols for severity classification (RED/YELLOW/GREEN).
 
-1. **General LLMs (GPT, Claude)**: Lack medical-specific training, require internet
-2. **Single-modality solutions**: Miss critical diagnostic signals
-3. **Cloud-only systems**: Unusable in CHW environments with poor connectivity
+### Novel Task: Bilirubin Regression
+
+We fine-tuned a **2-layer MLP regression head** on frozen MedSigLIP embeddings to predict continuous bilirubin levels (mg/dL) from neonatal skin images -- a novel application beyond MedSigLIP's original zero-shot classification design. Trained on 2,235 images from the NeoJaundice dataset with ground truth serum bilirubin measurements.
 
 ---
 
@@ -88,62 +56,42 @@ Patient Encounter
 
 ### Architecture
 
-**Offline-First Mobile App** built with:
-- React Native (cross-platform)
-- TensorFlow Lite (on-device inference)
-- WatermelonDB (offline database)
-- Zustand (state management)
+- **Frontend**: Streamlit interactive demo with 6 assessment modes
+- **Backend**: FastAPI with RESTful endpoints for all assessment types + agentic workflow
+- **Mobile**: React Native scaffold (offline-first design)
+- **Edge AI**: INT8 dynamic quantization, pre-computed text embeddings, TorchScript export
 
-### Model Optimization for Edge Deployment
+### Model Performance
 
-| Model | Original | Optimized | Method |
-|-------|----------|-----------|--------|
-| MedGemma 4B | 8GB | 2GB | INT4 quantization |
-| MedSigLIP | 1.6GB | 400MB | INT8 quantization |
-| HeAR | 350MB | 100MB | INT8 + pruning |
+| Task | Method | Metric |
+|------|--------|--------|
+| Anemia classification | MedSigLIP zero-shot + linear probe | 52.27% accuracy (pseudo-labels) |
+| Jaundice classification | MedSigLIP zero-shot + linear probe | 68.90% accuracy |
+| Bilirubin regression | MedSigLIP embeddings + MLP | MAE / Pearson r (see notebook) |
+| Cry analysis | HeAR embeddings + acoustic features | Qualitative assessment |
+| Clinical synthesis | MedGemma 4B-it | WHO IMNCI-aligned recommendations |
 
-**Performance on Mid-Range Android (Snapdragon 680):**
-- Image analysis: <2 seconds
-- Audio analysis: <1 second
-- Full assessment: <5 minutes
+### Edge Deployment
 
-### Agentic Workflow
+| Component | Cloud Size | Edge Size | Reduction |
+|-----------|-----------|-----------|-----------|
+| MedSigLIP vision encoder | ~400 MB | ~100 MB (INT8) | 75% |
+| Acoustic model | 673 KB | 679 KB (TorchScript) | ~0% |
+| Total on-device | - | ~101 MB | Offline-ready |
 
-7 specialized agents coordinate patient encounters:
-1. **TriageAgent** - Initial routing
-2. **ImageAgent** - Visual analysis
-3. **AudioAgent** - Sound analysis
-4. **SymptomAgent** - History taking
-5. **SynthesizerAgent** - Multi-modal reasoning
-6. **ProtocolAgent** - Treatment guidance
-7. **ReferralAgent** - Severity assessment
-
-### Deployment Challenges & Solutions
-
-| Challenge | Solution |
-|-----------|----------|
-| Large model size | Aggressive quantization + progressive loading |
-| No internet | Fully offline inference + sync when available |
-| Low-end devices | Model distillation + CPU fallback |
-| Battery drain | Efficient scheduling + sleep optimization |
-| CHW training | Simple UI + guided workflows |
+Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
 
 ---
 
 ## Links
 
-- **Video Demo (3 min)**: [YouTube/Google Drive Link]
+- **Video Demo (3 min)**: [YouTube Link]
 - **Public Code Repository**: [GitHub Link]
-- **Live Demo**: [Deployed App Link] *(Bonus)*
-- **HuggingFace Model**: [Fine-tuned Model Link] *(Bonus)*
+- **Live Demo**: [HuggingFace Spaces Link]
 
 ---
 
 ## Tracks
 
 - [x] Main Track
-- [x] Edge AI Prize
-- [ ] Agentic Workflow Prize
-- [ ] Novel Task Prize
-
-*(Select Main Track + ONE special prize only)*
+- [x] Agentic Workflow Prize

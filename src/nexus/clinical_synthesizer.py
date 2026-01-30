@@ -105,7 +105,9 @@ class ClinicalSynthesizer:
         Build clinical synthesis prompt for MedGemma.
 
         Args:
-            findings: Dictionary with anemia, jaundice, cry analysis results
+            findings: Dictionary with anemia, jaundice, cry analysis results.
+                      May include 'agent_context' and 'agent_reasoning_summary'
+                      when called from the agentic workflow engine.
 
         Returns:
             Formatted prompt for MedGemma
@@ -116,6 +118,8 @@ class ClinicalSynthesizer:
         cry = findings.get("cry", {})
         symptoms = findings.get("symptoms", "None reported")
         patient_info = findings.get("patient_info", {})
+        agent_context = findings.get("agent_context", {})
+        agent_reasoning = findings.get("agent_reasoning_summary", "")
 
         prompt = f"""You are a pediatric health assistant helping community health workers in low-resource settings.
 
@@ -123,6 +127,7 @@ PATIENT INFORMATION:
 - Age: {patient_info.get("age", "Not specified")}
 - Weight: {patient_info.get("weight", "Not specified")}
 - Location: {patient_info.get("location", "Rural health post")}
+- Patient Type: {patient_info.get("type", "Not specified")}
 
 ASSESSMENT FINDINGS:
 
@@ -146,7 +151,26 @@ ASSESSMENT FINDINGS:
 
 4. REPORTED SYMPTOMS:
    {symptoms}
+"""
 
+        # Add agentic workflow context if available
+        if agent_context:
+            prompt += f"""
+5. MULTI-AGENT ASSESSMENT CONTEXT:
+   - Triage Score: {agent_context.get("triage_score", "N/A")} (Risk: {agent_context.get("triage_risk", "N/A")})
+   - Critical Danger Signs: {", ".join(agent_context.get("critical_signs", [])) or "None"}
+   - WHO IMNCI Classification: {agent_context.get("protocol_classification", "N/A")}
+   - Applicable Protocols: {", ".join(agent_context.get("applicable_protocols", [])) or "N/A"}
+   - Referral Decision: {"YES" if agent_context.get("referral_needed") else "NO"} (Urgency: {agent_context.get("referral_urgency", "N/A")})
+"""
+
+        if agent_reasoning:
+            prompt += f"""
+6. AGENT REASONING TRAIL:
+{agent_reasoning}
+"""
+
+        prompt += """
 Based on these findings, provide a clinical assessment following WHO IMNCI protocols:
 
 1. ASSESSMENT SUMMARY (2-3 sentences in simple language)

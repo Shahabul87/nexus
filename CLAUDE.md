@@ -133,11 +133,27 @@ NEXUS Platform
 - [x] React Native mobile app scaffold
 - [x] FastAPI backend for mobile app
 
-### Next Steps (Week 3)
-1. Model quantization for edge deployment (INT8)
-2. Full mobile app integration testing
-3. Record 3-minute video demo
-4. Write 3-page competition submission
+### WEEK 3 COMPLETE (Jan 30, 2026)
+- [x] 6-agent agentic workflow engine (`src/nexus/agentic_workflow.py`)
+- [x] Agentic workflow integrated into pipeline, API, and Streamlit
+- [x] 41 agentic workflow tests passing
+- [x] Clinical synthesizer enhanced with agent reasoning traces
+- [x] Novel task: bilirubin regression from MedSigLIP embeddings
+- [x] Bilirubin regressor integrated into jaundice detector
+- [x] Reproducibility notebook (`notebooks/04_bilirubin_regression.ipynb`)
+- [x] Edge AI Mode toggle in Streamlit demo
+- [x] Edge benchmarks document (`docs/edge_benchmarks.md`)
+- [x] HuggingFace Spaces entry point (`app.py`)
+- [x] Competition writeup rewritten (`submission/writeup.md`)
+- [x] Video script updated (`submission/video/DEMO_VIDEO_SCRIPT.md`)
+- [x] README.md updated with architecture, setup, and structure
+
+### Remaining Before Submission
+1. Run bilirubin regression training with HF_TOKEN
+2. Run edge quantization scripts with HF_TOKEN
+3. Deploy to HuggingFace Spaces
+4. Record 3-minute video demo
+5. Submit on Kaggle
 
 ---
 
@@ -182,4 +198,4 @@ Using OpenAI CLIP instead of MedSigLIP could DISQUALIFY our submission.
 
 ---
 
-*Target: First Prize ($30,000) + Edge AI Prize ($5,000)*
+*Target: Main Track ($30,000) + Agentic Workflow Prize ($5,000+$5,000)*

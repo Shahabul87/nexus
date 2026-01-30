@@ -330,6 +330,54 @@ class ProtocolResponse(BaseModel):
     warning_signs: List[str]
 
 
+class AgentTraceResponse(BaseModel):
+    """Response model for a single agent's reasoning trace."""
+    agent_name: str
+    status: str = Field(..., description="success, skipped, or error")
+    reasoning: List[str] = Field(default_factory=list)
+    findings: dict = Field(default_factory=dict)
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    processing_time_ms: float = Field(0.0, ge=0.0)
+
+
+class AgenticRequest(BaseModel):
+    """Request model for agentic workflow assessment endpoint."""
+    patient_type: str = Field(default="newborn", description="pregnant or newborn")
+    conjunctiva_image: Optional[str] = Field(None, description="Base64 encoded conjunctiva image")
+    skin_image: Optional[str] = Field(None, description="Base64 encoded skin image")
+    cry_audio: Optional[str] = Field(None, description="Base64 encoded cry audio")
+    danger_signs: List[dict] = Field(default_factory=list, description="List of danger sign dicts")
+    patient_info: Optional[dict] = Field(None, description="Patient information")
+
+    @validator("patient_type")
+    def validate_patient_type(cls, v: str) -> str:
+        if v not in ["pregnant", "newborn"]:
+            raise ValueError("patient_type must be 'pregnant' or 'newborn'")
+        return v
+
+    @validator("conjunctiva_image", "skin_image", "cry_audio", pre=True)
+    def validate_optional_data(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < 100:
+            raise ValueError("Invalid data: too short to be valid")
+        return v
+
+
+class AgenticResponse(BaseModel):
+    """Response model for agentic workflow assessment."""
+    success: bool
+    patient_type: str
+    who_classification: str = Field(..., description="RED, YELLOW, or GREEN")
+    clinical_synthesis: str
+    recommendation: str
+    immediate_actions: List[str]
+    processing_time_ms: float
+    timestamp: str
+    triage: Optional[dict] = None
+    referral: Optional[dict] = None
+    protocol: Optional[dict] = None
+    agent_traces: List[AgentTraceResponse] = Field(default_factory=list)
+
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
     error: str
@@ -637,6 +685,155 @@ async def synthesize_findings(request: SynthesizeRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Agentic Workflow Assessment Endpoint
+@app.post("/api/agentic/assess", response_model=AgenticResponse)
+async def agentic_assessment(request: AgenticRequest):
+    """
+    Run comprehensive agentic workflow assessment with 6 specialized agents.
+
+    Pipeline: Triage -> Image (MedSigLIP) -> Audio (HeAR) -> Protocol (WHO IMNCI)
+              -> Referral -> Synthesis (MedGemma)
+
+    Returns full workflow result with step-by-step reasoning traces from each agent.
+    """
+    if not MODELS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Models not available")
+
+    temp_files = []
+    try:
+        from nexus.agentic_workflow import (
+            AgenticWorkflowEngine,
+            AgentPatientInfo,
+            DangerSign,
+            WorkflowInput,
+        )
+
+        # Build patient info
+        info = AgentPatientInfo(patient_type=request.patient_type)
+        if request.patient_info:
+            info.patient_id = request.patient_info.get("patient_id", "")
+            info.gestational_weeks = request.patient_info.get("gestational_weeks")
+            info.birth_weight = request.patient_info.get("birth_weight")
+            info.apgar_score = request.patient_info.get("apgar_score")
+            info.age_hours = request.patient_info.get("age_hours")
+
+        # Build danger signs
+        signs = []
+        for s in request.danger_signs:
+            signs.append(DangerSign(
+                id=s.get("id", ""),
+                label=s.get("label", ""),
+                severity=s.get("severity", "medium"),
+                present=s.get("present", True),
+            ))
+
+        # Decode base64 inputs to temp files
+        conjunctiva_path = None
+        skin_path = None
+        cry_path = None
+
+        if request.conjunctiva_image:
+            image_data = base64.b64decode(request.conjunctiva_image)
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp.write(image_data)
+                conjunctiva_path = tmp.name
+                temp_files.append(tmp.name)
+
+        if request.skin_image:
+            image_data = base64.b64decode(request.skin_image)
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp.write(image_data)
+                skin_path = tmp.name
+                temp_files.append(tmp.name)
+
+        if request.cry_audio:
+            audio_data = base64.b64decode(request.cry_audio)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(audio_data)
+                cry_path = tmp.name
+                temp_files.append(tmp.name)
+
+        workflow_input = WorkflowInput(
+            patient_type=request.patient_type,
+            patient_info=info,
+            danger_signs=signs,
+            conjunctiva_image=conjunctiva_path,
+            skin_image=skin_path,
+            cry_audio=cry_path,
+        )
+
+        # Create engine with existing model instances
+        engine = AgenticWorkflowEngine(
+            anemia_detector=anemia_detector,
+            jaundice_detector=jaundice_detector,
+            cry_analyzer=cry_analyzer,
+            synthesizer=clinical_synthesizer,
+        )
+
+        result = engine.execute(workflow_input)
+
+        # Build response
+        agent_traces = [
+            AgentTraceResponse(
+                agent_name=t.agent_name,
+                status=t.status,
+                reasoning=t.reasoning,
+                findings=t.findings,
+                confidence=t.confidence,
+                processing_time_ms=t.processing_time_ms,
+            )
+            for t in result.agent_traces
+        ]
+
+        triage_dict = None
+        if result.triage_result:
+            triage_dict = {
+                "risk_level": result.triage_result.risk_level,
+                "score": result.triage_result.score,
+                "critical_signs": result.triage_result.critical_signs,
+                "immediate_referral": result.triage_result.immediate_referral_needed,
+            }
+
+        referral_dict = None
+        if result.referral_result:
+            referral_dict = {
+                "referral_needed": result.referral_result.referral_needed,
+                "urgency": result.referral_result.urgency,
+                "facility_level": result.referral_result.facility_level,
+                "reason": result.referral_result.reason,
+                "timeframe": result.referral_result.timeframe,
+            }
+
+        protocol_dict = None
+        if result.protocol_result:
+            protocol_dict = {
+                "classification": result.protocol_result.classification,
+                "applicable_protocols": result.protocol_result.applicable_protocols,
+                "treatment_recommendations": result.protocol_result.treatment_recommendations,
+                "follow_up_schedule": result.protocol_result.follow_up_schedule,
+            }
+
+        return AgenticResponse(
+            success=result.success,
+            patient_type=result.patient_type,
+            who_classification=result.who_classification,
+            clinical_synthesis=result.clinical_synthesis,
+            recommendation=result.recommendation,
+            immediate_actions=result.immediate_actions,
+            processing_time_ms=result.processing_time_ms,
+            timestamp=result.timestamp,
+            triage=triage_dict,
+            referral=referral_dict,
+            protocol=protocol_dict,
+            agent_traces=agent_traces,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for tmp_path in temp_files:
+            cleanup_temp_file(tmp_path)
 
 
 # Model Info Endpoint

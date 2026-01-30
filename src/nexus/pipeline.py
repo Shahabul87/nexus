@@ -381,6 +381,119 @@ class NEXUSPipeline:
 
         return result
 
+    def agentic_assessment(
+        self,
+        patient_type: str = "newborn",
+        conjunctiva_image: Optional[Union[str, Path]] = None,
+        skin_image: Optional[Union[str, Path]] = None,
+        cry_audio: Optional[Union[str, Path]] = None,
+        danger_signs: Optional[List[Dict]] = None,
+        patient_info: Optional[Dict] = None,
+    ) -> Dict:
+        """
+        Run the full agentic clinical workflow with 6 specialized agents.
+
+        This provides richer output than full_assessment() — each agent emits
+        step-by-step reasoning traces forming a complete audit trail.
+
+        Args:
+            patient_type: "pregnant" or "newborn"
+            conjunctiva_image: Path to conjunctiva image for anemia screening
+            skin_image: Path to skin image for jaundice detection
+            cry_audio: Path to cry audio for asphyxia detection
+            danger_signs: List of danger sign dicts with keys: id, label, severity, present
+            patient_info: Patient information dict
+
+        Returns:
+            Dict with workflow result including agent_traces list
+        """
+        from .agentic_workflow import (
+            AgenticWorkflowEngine,
+            AgentPatientInfo,
+            DangerSign,
+            WorkflowInput,
+        )
+
+        # Build patient info
+        info = AgentPatientInfo(patient_type=patient_type)
+        if patient_info:
+            info.patient_id = patient_info.get("patient_id", "")
+            info.gestational_weeks = patient_info.get("gestational_weeks")
+            info.birth_weight = patient_info.get("birth_weight")
+            info.apgar_score = patient_info.get("apgar_score")
+            info.age_hours = patient_info.get("age_hours")
+
+        # Build danger signs
+        signs = []
+        if danger_signs:
+            for s in danger_signs:
+                signs.append(DangerSign(
+                    id=s.get("id", ""),
+                    label=s.get("label", ""),
+                    severity=s.get("severity", "medium"),
+                    present=s.get("present", True),
+                ))
+
+        workflow_input = WorkflowInput(
+            patient_type=patient_type,
+            patient_info=info,
+            danger_signs=signs,
+            conjunctiva_image=conjunctiva_image,
+            skin_image=skin_image,
+            cry_audio=cry_audio,
+        )
+
+        # Create engine with existing model instances to avoid reloading
+        engine = AgenticWorkflowEngine(
+            anemia_detector=self._anemia_detector,
+            jaundice_detector=self._jaundice_detector,
+            cry_analyzer=self._cry_analyzer,
+        )
+
+        result = engine.execute(workflow_input)
+
+        # Serialize to dict
+        return {
+            "success": result.success,
+            "patient_type": result.patient_type,
+            "who_classification": result.who_classification,
+            "clinical_synthesis": result.clinical_synthesis,
+            "recommendation": result.recommendation,
+            "immediate_actions": result.immediate_actions,
+            "processing_time_ms": result.processing_time_ms,
+            "timestamp": result.timestamp,
+            "triage": {
+                "risk_level": result.triage_result.risk_level,
+                "score": result.triage_result.score,
+                "critical_signs": result.triage_result.critical_signs,
+                "immediate_referral": result.triage_result.immediate_referral_needed,
+            } if result.triage_result else None,
+            "referral": {
+                "referral_needed": result.referral_result.referral_needed,
+                "urgency": result.referral_result.urgency,
+                "facility_level": result.referral_result.facility_level,
+                "reason": result.referral_result.reason,
+                "timeframe": result.referral_result.timeframe,
+            } if result.referral_result else None,
+            "protocol": {
+                "classification": result.protocol_result.classification,
+                "applicable_protocols": result.protocol_result.applicable_protocols,
+                "treatment_recommendations": result.protocol_result.treatment_recommendations,
+                "follow_up_schedule": result.protocol_result.follow_up_schedule,
+            } if result.protocol_result else None,
+            "agent_traces": [
+                {
+                    "agent_name": t.agent_name,
+                    "status": t.status,
+                    "reasoning": t.reasoning,
+                    "findings": t.findings,
+                    "confidence": t.confidence,
+                    "processing_time_ms": t.processing_time_ms,
+                }
+                for t in result.agent_traces
+            ],
+        }
+
     def full_assessment(
         self,
         patient: PatientInfo,

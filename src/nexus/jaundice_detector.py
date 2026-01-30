@@ -29,6 +29,26 @@ MEDSIGLIP_MODEL_IDS = [
 ]
 
 
+class _BilirubinRegressor(nn.Module):
+    """2-layer MLP regression head for bilirubin prediction (mg/dL).
+
+    Must match the architecture in scripts/training/finetune_bilirubin_regression.py
+    so that saved state_dict keys align.
+    """
+
+    def __init__(self, input_dim: int = 1152, hidden_dim: int = 256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x).squeeze(-1)
+
+
 class JaundiceDetector:
     """
     Detects neonatal jaundice from skin/sclera images using MedSigLIP.
@@ -84,6 +104,7 @@ class JaundiceDetector:
         self.threshold = threshold
         self._model_loaded = False
         self.classifier = None  # Can be set by pipeline for trained classification
+        self.regressor = None   # Bilirubin regression head (MedSigLIP embeddings -> mg/dL)
 
         # Determine which models to try
         models_to_try = [model_name] if model_name else MEDSIGLIP_MODEL_IDS
@@ -120,10 +141,14 @@ class JaundiceDetector:
         # Pre-compute text embeddings
         self._precompute_text_embeddings()
 
+        # Try to load bilirubin regression model
+        self._load_regressor()
+
         # Indicate which model variant is being used
         is_medsiglip = "medsiglip" in self.model_name
         model_type = "MedSigLIP" if is_medsiglip else "SigLIP (fallback)"
-        print(f"Jaundice Detector (HAI-DEF {model_type}) initialized on {self.device}")
+        regressor_status = "with regressor" if self.regressor else "color-based only"
+        print(f"Jaundice Detector (HAI-DEF {model_type}, {regressor_status}) initialized on {self.device}")
 
     def _precompute_text_embeddings(self) -> None:
         """Pre-compute text embeddings for zero-shot classification using SigLIP."""
@@ -158,6 +183,33 @@ class JaundiceDetector:
 
             self.jaundice_embeddings = self.jaundice_embeddings / self.jaundice_embeddings.norm(dim=-1, keepdim=True)
             self.normal_embeddings = self.normal_embeddings / self.normal_embeddings.norm(dim=-1, keepdim=True)
+
+    def _load_regressor(self) -> None:
+        """Load trained bilirubin regression head if available."""
+        model_paths = [
+            Path(__file__).parent.parent.parent / "models" / "linear_probes" / "bilirubin_regressor.pt",
+            Path("models/linear_probes/bilirubin_regressor.pt"),
+        ]
+
+        for model_path in model_paths:
+            if model_path.exists():
+                try:
+                    checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+                    input_dim = checkpoint.get("input_dim", 1152)
+                    hidden_dim = checkpoint.get("hidden_dim", 256)
+
+                    # Build regression head matching BilirubinRegressorHead architecture
+                    regressor = _BilirubinRegressor(input_dim, hidden_dim)
+                    regressor.load_state_dict(checkpoint["model_state_dict"])
+                    regressor.to(self.device)
+                    regressor.eval()
+
+                    self.regressor = regressor
+                    print(f"Bilirubin regressor loaded from {model_path}")
+                    return
+                except Exception as e:
+                    print(f"Warning: Could not load regressor from {model_path}: {e}")
+                    self.regressor = None
 
     def preprocess_image(self, image: Union[str, Path, Image.Image]) -> Image.Image:
         """Preprocess image for analysis."""
@@ -245,23 +297,33 @@ class JaundiceDetector:
         else:
             jaundice_prob, model_method = self._classify_zero_shot(image_embedding)
 
-        # Estimate bilirubin from color (always useful as additional signal)
+        # Color-based bilirubin estimate (always available)
         estimated_bilirubin = self.estimate_bilirubin(pil_image)
 
-        # Determine severity based on estimated bilirubin
-        if estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["low"]:
+        # ML-based bilirubin estimate from trained regressor on MedSigLIP embeddings
+        estimated_bilirubin_ml = None
+        if self.regressor is not None:
+            with torch.no_grad():
+                bilirubin_pred = self.regressor(image_embedding)
+                estimated_bilirubin_ml = max(0.0, round(float(bilirubin_pred.item()), 1))
+
+        # Use ML estimate for severity when available, otherwise color-based
+        bilirubin_for_severity = estimated_bilirubin_ml if estimated_bilirubin_ml is not None else estimated_bilirubin
+
+        # Determine severity based on bilirubin level
+        if bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["low"]:
             severity = "none"
             needs_phototherapy = False
             recommendation = "No jaundice detected. Continue routine care."
-        elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["moderate"]:
+        elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["moderate"]:
             severity = "mild"
             needs_phototherapy = False
             recommendation = "Mild jaundice. Monitor closely and ensure adequate feeding."
-        elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["high"]:
+        elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["high"]:
             severity = "moderate"
             needs_phototherapy = False
             recommendation = "Moderate jaundice. Recheck in 12-24 hours. Consider phototherapy if rising."
-        elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["critical"]:
+        elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["critical"]:
             severity = "severe"
             needs_phototherapy = True
             recommendation = "URGENT: Start phototherapy. Refer for serum bilirubin confirmation."
@@ -273,7 +335,7 @@ class JaundiceDetector:
         is_medsiglip = "medsiglip" in self.model_name
         base_model = "MedSigLIP (HAI-DEF)" if is_medsiglip else "SigLIP (fallback)"
 
-        return {
+        result = {
             "has_jaundice": jaundice_prob > self.threshold,
             "confidence": max(jaundice_prob, 1 - jaundice_prob),
             "jaundice_score": jaundice_prob,
@@ -284,6 +346,14 @@ class JaundiceDetector:
             "model": self.model_name,
             "model_type": f"{base_model} + {model_method}",
         }
+
+        if estimated_bilirubin_ml is not None:
+            result["estimated_bilirubin_ml"] = estimated_bilirubin_ml
+            result["bilirubin_method"] = "MedSigLIP Regressor"
+        else:
+            result["bilirubin_method"] = "Color Analysis"
+
+        return result
 
     def _classify_with_trained_model(self, image_embedding: torch.Tensor) -> Tuple[float, str]:
         """
