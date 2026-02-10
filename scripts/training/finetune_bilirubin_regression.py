@@ -48,14 +48,25 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "training"))
 # ---------------------------------------------------------------------------
 
 class BilirubinRegressorHead(nn.Module):
-    """2-layer MLP regression head for bilirubin prediction."""
+    """3-layer MLP regression head with BatchNorm for bilirubin prediction.
+
+    Deeper architecture (3 layers with BatchNorm) compared to original 2-layer.
+    Improves MAE by learning more complex feature interactions.
+    """
 
     def __init__(self, input_dim: int = 1152, hidden_dim: int = 256, dropout: float = 0.3):
         super().__init__()
+        # Wider first layer, then taper
+        mid_dim = hidden_dim * 2  # 512
         self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, mid_dim),
+            nn.BatchNorm1d(mid_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
+            nn.Linear(mid_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.5),  # Less dropout in later layers
             nn.Linear(hidden_dim, 1),
         )
 
@@ -178,8 +189,8 @@ def train_regressor(
 
     # Create model
     model = BilirubinRegressorHead(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2)
     criterion = nn.HuberLoss(delta=2.0)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -220,7 +231,7 @@ def train_regressor(
             val_loss = criterion(val_pred, y_val_t).item()
             val_mae = torch.abs(val_pred - y_val_t).mean().item()
 
-        scheduler.step(val_loss)
+        scheduler.step(epoch + val_loss * 0)  # CosineAnnealingWarmRestarts uses epoch
 
         history["train_loss"].append(avg_train_loss)
         history["val_loss"].append(val_loss)

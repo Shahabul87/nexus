@@ -43,8 +43,7 @@ class CryAnalyzer:
     Analyzes infant cry audio for birth asphyxia detection using HeAR.
 
     HAI-DEF Model: HeAR (google/hear-pytorch)
-    Method: Embedding extraction + linear classifier
-    Expected Accuracy: 85-93% (per NEXUS_MASTER_PLAN.md)
+    Method: Embedding extraction + acoustic feature analysis
 
     Process:
     1. Split audio into 2-second chunks (HeAR requirement)
@@ -67,6 +66,21 @@ class CryAnalyzer:
     # HeAR model ID on HuggingFace (PyTorch)
     HEAR_MODEL_ID = "google/hear-pytorch"
 
+    # Default classifier path (relative to project root)
+    DEFAULT_CLASSIFIER_PATHS = [
+        Path(__file__).parent.parent.parent / "models" / "linear_probes" / "cry_classifier.joblib",
+        Path("models/linear_probes/cry_classifier.joblib"),
+    ]
+
+    # Cry type labels from trained classifier
+    CRY_TYPE_LABELS = {
+        0: "belly_pain",
+        1: "burping",
+        2: "discomfort",
+        3: "hungry",
+        4: "tired",
+    }
+
     def __init__(
         self,
         device: Optional[str] = None,
@@ -78,7 +92,7 @@ class CryAnalyzer:
 
         Args:
             device: Device to run model on
-            classifier_path: Path to trained linear classifier (optional)
+            classifier_path: Path to trained linear classifier (optional, auto-detected)
             use_hear: Whether to use HeAR embeddings (True) or acoustic features (False)
         """
         if not HAS_AUDIO:
@@ -95,13 +109,35 @@ class CryAnalyzer:
         if use_hear:
             self._load_hear_model()
 
-        # Load trained classifier if provided
-        if classifier_path and Path(classifier_path).exists() and HAS_SKLEARN:
-            self.classifier = joblib.load(classifier_path)
-            print(f"Loaded classifier from {classifier_path}")
+        # Load trained classifier: explicit path first, then auto-detect
+        self._load_classifier(classifier_path)
 
         mode = "HeAR" if self._hear_available else "Acoustic Features (HeAR unavailable)"
-        print(f"Cry Analyzer (HAI-DEF {mode}) initialized on {self.device}")
+        classifier_status = "with trained classifier" if self.classifier else "heuristic scoring"
+        print(f"Cry Analyzer (HAI-DEF {mode}, {classifier_status}) initialized on {self.device}")
+
+    def _load_classifier(self, classifier_path: Optional[str] = None) -> None:
+        """Load trained cry classifier from file.
+
+        Searches explicit path first, then default locations.
+        """
+        if not HAS_SKLEARN:
+            return
+
+        paths_to_try = []
+        if classifier_path:
+            paths_to_try.append(Path(classifier_path))
+        paths_to_try.extend(self.DEFAULT_CLASSIFIER_PATHS)
+
+        for path in paths_to_try:
+            if path.exists():
+                try:
+                    self.classifier = joblib.load(path)
+                    self.classifier_path = str(path)
+                    print(f"Loaded cry classifier from {path}")
+                    return
+                except Exception as e:
+                    print(f"Warning: Could not load classifier from {path}: {e}")
 
     def _load_hear_model(self) -> None:
         """Load HeAR model from HuggingFace (PyTorch).
@@ -186,7 +222,7 @@ class CryAnalyzer:
             ])
             return feature_vector
 
-        from nexus.hear_preprocessing import preprocess_audio
+        from .hear_preprocessing import preprocess_audio
 
         # Split into 2-second chunks for HeAR
         chunks = self._split_audio_chunks(audio)
@@ -361,10 +397,15 @@ class CryAnalyzer:
         cry_type = self._classify_cry_type(features)
 
         # Try HeAR-based classification first
-        if self._hear_available and self.hear_model is not None:
-            asphyxia_risk, model_used = self._analyze_with_hear(audio)
+        classified_cry_type = None
+        if self._hear_available or (self.classifier is not None and HAS_SKLEARN):
+            asphyxia_risk, model_used, classified_cry_type = self._analyze_with_hear(audio)
         else:
             asphyxia_risk, model_used = self._analyze_with_rules(features)
+
+        # Use classifier's cry type if available, otherwise rule-based
+        if classified_cry_type is not None:
+            cry_type = classified_cry_type
 
         # Determine risk level and recommendation based on risk score
         if asphyxia_risk > 0.6:
@@ -396,7 +437,7 @@ class CryAnalyzer:
             "model_note": self._get_model_note(model_used),
         }
 
-    def _analyze_with_hear(self, audio: np.ndarray) -> Tuple[float, str]:
+    def _analyze_with_hear(self, audio: np.ndarray) -> Tuple[float, str, Optional[str]]:
         """
         Analyze cry using HeAR embeddings.
 
@@ -404,37 +445,44 @@ class CryAnalyzer:
             audio: Audio signal array (16kHz)
 
         Returns:
-            Tuple of (asphyxia_risk, model_name)
+            Tuple of (asphyxia_risk, model_name, predicted_cry_type)
         """
         # Extract HeAR embeddings
         embeddings = self.extract_hear_embeddings(audio)
 
         # Use trained classifier if available
         if self.classifier is not None and HAS_SKLEARN:
-            # Classifier expects 2D input: [n_samples, n_features]
             embeddings_2d = embeddings.reshape(1, -1)
 
-            # Get probability prediction
-            if hasattr(self.classifier, 'predict_proba'):
-                proba = self.classifier.predict_proba(embeddings_2d)
-                # Assume binary classification: [normal, asphyxia]
-                asphyxia_risk = float(proba[0, 1]) if proba.shape[1] > 1 else float(proba[0, 0])
-            else:
-                # Fallback to binary prediction
-                prediction = self.classifier.predict(embeddings_2d)
-                asphyxia_risk = float(prediction[0])
+            # Multi-class cry type classification
+            prediction = int(self.classifier.predict(embeddings_2d)[0])
+            predicted_type = self.CRY_TYPE_LABELS.get(prediction, "unknown")
 
-            return asphyxia_risk, "HeAR + Classifier"
+            # Get class probabilities for confidence
+            if hasattr(self.classifier, 'predict_proba'):
+                proba = self.classifier.predict_proba(embeddings_2d)[0]
+                confidence = float(max(proba))
+
+                # Derive asphyxia risk from cry type probabilities
+                # Pain and belly_pain cries are most associated with distress
+                pain_classes = {"belly_pain": 0, "discomfort": 2}
+                distress_prob = sum(
+                    proba[idx] for name, idx in pain_classes.items()
+                    if idx < len(proba)
+                )
+                # Scale distress probability to asphyxia risk
+                asphyxia_risk = min(1.0, distress_prob * 0.8)
+            else:
+                confidence = 0.7
+                asphyxia_risk = 0.5 if predicted_type in ("belly_pain", "discomfort") else 0.2
+
+            return asphyxia_risk, "HeAR + Classifier", predicted_type
 
         # No classifier: use embedding-based heuristic
-        # HeAR embeddings capture acoustic patterns; we use simple statistics
-        # This is a fallback when no trained classifier is available
         embedding_mean = float(np.mean(embeddings))
         embedding_std = float(np.std(embeddings))
         embedding_max = float(np.max(np.abs(embeddings)))
 
-        # Heuristic: abnormal cries tend to have higher variance in embeddings
-        # These thresholds should be calibrated on labeled data
         risk_score = 0.0
         if embedding_std > 0.5:
             risk_score += 0.3
@@ -443,7 +491,7 @@ class CryAnalyzer:
         if abs(embedding_mean) > 0.3:
             risk_score += 0.2
 
-        return min(risk_score, 1.0), "HeAR (uncalibrated)"
+        return min(risk_score, 1.0), "HeAR (uncalibrated)", None
 
     def _analyze_with_rules(self, features: Dict) -> Tuple[float, str]:
         """

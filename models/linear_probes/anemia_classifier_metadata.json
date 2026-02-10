@@ -1,0 +1,30 @@
+{
+  "model_type": "SVM_RBF",
+  "embedding_source": "MedSigLIP (google/medsiglip-448)",
+  "embedding_dim": 1152,
+  "num_classes": 2,
+  "classes": {
+    "healthy": 0,
+    "anemic": 1
+  },
+  "cv_accuracy_mean": 0.9994269340974211,
+  "cv_accuracy_std": 0.0011461318051575909,
+  "num_original_samples": 218,
+  "num_augmented_samples": 1744,
+  "augmentations_per_image": 7,
+  "all_results": {
+    "LogisticRegression": {
+      "mean_accuracy": 0.8985096993050752,
+      "std_accuracy": 0.008415256920621202
+    },
+    "SVM_RBF": {
+      "mean_accuracy": 0.9994269340974211,
+      "std_accuracy": 0.0011461318051575909
+    },
+    "SVM_Linear": {
+      "mean_accuracy": 0.8899186509896915,
+      "std_accuracy": 0.011746435929843532
+    }
+  },
+  "seed": 42
+}

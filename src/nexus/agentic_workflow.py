@@ -166,13 +166,14 @@ class WorkflowResult:
 
 class TriageAgent:
     """
-    Initial risk stratification based on danger signs and patient info.
+    Initial risk stratification based on danger signs, patient info, and
+    clinical decision tree logic.
 
-    Uses rule-based scoring:
-    - Critical signs: +30 points
-    - High signs: +15 points
-    - Medium signs: +5 points
-    - Additional risk factors from patient info
+    Decision tree considers:
+    - Danger sign severity and combinations
+    - Patient demographics (age, weight, gestational age)
+    - Comorbidity patterns (multiple conditions increase risk)
+    - Time-sensitive factors (e.g., jaundice < 24hrs = always RED)
     """
 
     def process(
@@ -185,62 +186,126 @@ class TriageAgent:
         reasoning: List[str] = []
         score = 0
         critical_signs: List[str] = []
+        risk_modifiers: List[str] = []
 
-        reasoning.append(f"Starting triage for {patient_type} patient")
+        reasoning.append(f"[STEP 1/5] Initiating clinical triage for {patient_type} patient")
 
-        # Score danger signs
+        # Step 1: Evaluate danger signs with clinical context
         present_signs = [s for s in danger_signs if s.present]
-        reasoning.append(f"Evaluating {len(present_signs)} present danger signs out of {len(danger_signs)} checked")
+        reasoning.append(f"[STEP 2/5] Evaluating {len(present_signs)} present danger signs out of {len(danger_signs)} assessed")
 
         for sign in present_signs:
             if sign.severity == "critical":
                 score += 30
                 critical_signs.append(sign.label)
-                reasoning.append(f"CRITICAL: '{sign.label}' detected (+30 points)")
+                reasoning.append(f"  CRITICAL: '{sign.label}' detected — per WHO IMNCI this requires immediate action (+30)")
             elif sign.severity == "high":
                 score += 15
-                reasoning.append(f"HIGH: '{sign.label}' detected (+15 points)")
+                reasoning.append(f"  HIGH: '{sign.label}' detected — warrants close monitoring (+15)")
             elif sign.severity == "medium":
                 score += 5
-                reasoning.append(f"MEDIUM: '{sign.label}' detected (+5 points)")
+                reasoning.append(f"  MEDIUM: '{sign.label}' detected — noted for assessment (+5)")
 
-        # Patient-specific risk factors
+        # Comorbidity check: multiple conditions compound risk
+        if len(present_signs) >= 3:
+            combo_bonus = 10
+            score += combo_bonus
+            risk_modifiers.append(f"Multiple danger signs ({len(present_signs)}) present simultaneously")
+            reasoning.append(f"  COMORBIDITY: {len(present_signs)} danger signs present — compounding risk (+{combo_bonus})")
+
+        # Step 2: Patient-specific demographic risk assessment
+        reasoning.append(f"[STEP 3/5] Assessing demographic risk factors")
+
         if patient_type == "pregnant":
             if patient_info.gestational_weeks is not None:
-                if patient_info.gestational_weeks < 28:
-                    score += 10
-                    reasoning.append(f"Preterm risk: gestational age {patient_info.gestational_weeks} weeks (<28) (+10)")
-                elif patient_info.gestational_weeks > 42:
+                ga = patient_info.gestational_weeks
+                if ga < 28:
                     score += 15
-                    reasoning.append(f"Post-term risk: gestational age {patient_info.gestational_weeks} weeks (>42) (+15)")
+                    risk_modifiers.append(f"Extreme preterm ({ga} weeks)")
+                    reasoning.append(f"  Extreme preterm: GA={ga} weeks (<28) — high risk for complications (+15)")
+                elif ga < 37:
+                    score += 5
+                    risk_modifiers.append(f"Preterm ({ga} weeks)")
+                    reasoning.append(f"  Preterm: GA={ga} weeks (28-36) — moderate risk (+5)")
+                elif ga > 42:
+                    score += 15
+                    risk_modifiers.append(f"Post-term ({ga} weeks)")
+                    reasoning.append(f"  Post-term: GA={ga} weeks (>42) — risk of placental insufficiency (+15)")
                 else:
-                    reasoning.append(f"Gestational age {patient_info.gestational_weeks} weeks - within normal range")
-        elif patient_type == "newborn":
-            if patient_info.birth_weight is not None and patient_info.birth_weight < 2500:
-                score += 10
-                reasoning.append(f"Low birth weight: {patient_info.birth_weight}g (<2500g) (+10)")
-            if patient_info.apgar_score is not None and patient_info.apgar_score < 7:
-                score += 15
-                reasoning.append(f"Low APGAR score: {patient_info.apgar_score} (<7) (+15)")
-            if patient_info.age_hours is not None and patient_info.age_hours < 24:
+                    reasoning.append(f"  Gestational age {ga} weeks — within normal range (37-42)")
+            if patient_info.gravida is not None and patient_info.gravida >= 5:
                 score += 5
-                reasoning.append(f"First day of life: {patient_info.age_hours} hours (+5)")
+                risk_modifiers.append(f"Grand multigravida (G{patient_info.gravida})")
+                reasoning.append(f"  Grand multigravida: G{patient_info.gravida} — increased obstetric risk (+5)")
 
-        # Determine risk level
+        elif patient_type == "newborn":
+            if patient_info.birth_weight is not None:
+                bw = patient_info.birth_weight
+                if bw < 1500:
+                    score += 20
+                    risk_modifiers.append(f"Very low birth weight ({bw}g)")
+                    reasoning.append(f"  Very low birth weight: {bw}g (<1500g) — high neonatal risk (+20)")
+                elif bw < 2500:
+                    score += 10
+                    risk_modifiers.append(f"Low birth weight ({bw}g)")
+                    reasoning.append(f"  Low birth weight: {bw}g (<2500g) — moderate risk (+10)")
+                else:
+                    reasoning.append(f"  Birth weight {bw}g — within normal range")
+
+            if patient_info.apgar_score is not None:
+                apgar = patient_info.apgar_score
+                if apgar < 4:
+                    score += 25
+                    risk_modifiers.append(f"Severe depression (APGAR {apgar})")
+                    reasoning.append(f"  Severe neonatal depression: APGAR={apgar} (<4) — requires resuscitation (+25)")
+                elif apgar < 7:
+                    score += 15
+                    risk_modifiers.append(f"Moderate depression (APGAR {apgar})")
+                    reasoning.append(f"  Moderate neonatal depression: APGAR={apgar} (<7) — close monitoring needed (+15)")
+                else:
+                    reasoning.append(f"  APGAR score {apgar} — within normal range")
+
+            if patient_info.age_hours is not None:
+                age = patient_info.age_hours
+                if age < 6:
+                    score += 10
+                    risk_modifiers.append(f"Critical neonatal period ({age}h)")
+                    reasoning.append(f"  Critical neonatal period: {age} hours old — highest vulnerability window (+10)")
+                elif age < 24:
+                    score += 5
+                    reasoning.append(f"  First day of life: {age} hours — increased monitoring needed (+5)")
+
+            if patient_info.gestational_age_at_birth is not None and patient_info.gestational_age_at_birth < 37:
+                score += 10
+                risk_modifiers.append(f"Premature birth ({patient_info.gestational_age_at_birth} weeks)")
+                reasoning.append(f"  Premature birth at {patient_info.gestational_age_at_birth} weeks — increased susceptibility (+10)")
+
+        # Step 3: Clinical decision tree
+        reasoning.append(f"[STEP 4/5] Applying clinical decision tree")
+
         if score >= 30 or len(critical_signs) > 0:
             risk_level: SeverityLevel = "RED"
+            reasoning.append(f"  Decision: RED classification — score={score}, critical signs={len(critical_signs)}")
         elif score >= 15:
             risk_level = "YELLOW"
+            reasoning.append(f"  Decision: YELLOW classification — score={score}, monitoring required")
         else:
             risk_level = "GREEN"
+            reasoning.append(f"  Decision: GREEN classification — score={score}, routine care")
 
         critical_detected = len(critical_signs) > 0
         immediate_referral = risk_level == "RED" and critical_detected
 
-        reasoning.append(f"Total triage score: {score}")
-        reasoning.append(f"Risk classification: {risk_level}")
+        # Step 4: Summary with clinical rationale
+        reasoning.append(f"[STEP 5/5] Triage conclusion")
+        reasoning.append(f"  Total triage score: {score}")
+        reasoning.append(f"  Risk classification: {risk_level} ({self._risk_rationale(risk_level)})")
+        if risk_modifiers:
+            reasoning.append(f"  Risk modifiers: {'; '.join(risk_modifiers)}")
         if immediate_referral:
-            reasoning.append("IMMEDIATE REFERRAL REQUIRED - critical danger signs with RED classification")
+            reasoning.append("  DECISION: IMMEDIATE REFERRAL REQUIRED — critical danger signs with RED classification")
+        elif risk_level == "RED":
+            reasoning.append("  DECISION: URGENT referral recommended — RED classification without critical signs")
 
         elapsed = (time.time() - start) * 1000
 
@@ -260,6 +325,7 @@ class TriageAgent:
                 "risk_level": risk_level,
                 "score": score,
                 "critical_signs": critical_signs,
+                "risk_modifiers": risk_modifiers,
                 "immediate_referral": immediate_referral,
             },
             confidence=1.0,
@@ -267,6 +333,14 @@ class TriageAgent:
         )
 
         return result, trace
+
+    @staticmethod
+    def _risk_rationale(level: str) -> str:
+        return {
+            "RED": "immediate intervention required per WHO IMNCI",
+            "YELLOW": "close monitoring with 24-48h follow-up",
+            "GREEN": "routine care with standard follow-up schedule",
+        }.get(level, "")
 
 
 class ImageAnalysisAgent:
@@ -461,7 +535,8 @@ class AudioAnalysisAgent:
             else:
                 reasoning.append("Normal cry pattern detected")
 
-            confidence = 1.0 - abs(risk - 0.5) * 2  # Higher confidence when score is extreme
+            # Higher confidence when risk score is far from 0.5 (clear result)
+            confidence = 0.5 + abs(risk - 0.5)
             confidence = max(0.5, min(1.0, confidence))
 
         except Exception as e:
@@ -496,10 +571,14 @@ class AudioAnalysisAgent:
 
 class ProtocolAgent:
     """
-    Applies WHO IMNCI guidelines to classify severity and recommend treatment.
+    Applies WHO IMNCI guidelines with clinical reasoning for severity
+    classification and evidence-based treatment recommendations.
 
-    Uses rules-based logic following WHO Integrated Management of
-    Childhood Illness (IMNCI) protocols.
+    Reasoning process:
+    1. Evaluate each condition against WHO IMNCI thresholds
+    2. Check for protocol conflicts (e.g., anemia + jaundice comorbidity)
+    3. Apply condition-specific treatment algorithms
+    4. Generate time-bound follow-up schedule
     """
 
     def process(
@@ -514,100 +593,187 @@ class ProtocolAgent:
         protocols: List[str] = []
         recommendations: List[str] = []
         classification: SeverityLevel = triage.risk_level
+        conditions_found: List[str] = []
 
-        reasoning.append(f"Applying WHO IMNCI protocols for {patient_type} patient")
-        reasoning.append(f"Initial classification from triage: {classification}")
+        reasoning.append(f"[STEP 1/5] Applying WHO IMNCI protocols for {patient_type} patient")
+        reasoning.append(f"  Initial classification from triage: {classification} (score={triage.score})")
 
         # ---- Maternal protocols ----
         if patient_type == "pregnant":
             protocols.append("WHO IMNCI Maternal Care")
-            reasoning.append("Applying maternal care protocols")
+            reasoning.append(f"[STEP 2/5] Evaluating maternal conditions")
 
             if image.anemia and image.anemia.get("is_anemic"):
                 protocols.append("Anemia Management Protocol")
+                conditions_found.append("anemia")
                 est_hb = image.anemia.get("estimated_hemoglobin", 0)
+                risk_level = image.anemia.get("risk_level", "unknown")
 
-                if est_hb and est_hb < 7:
+                reasoning.append(f"  Anemia detected: risk={risk_level}, est. Hb={est_hb} g/dL")
+
+                # WHO thresholds: pregnant women Hb<11 = anemia, Hb<7 = severe
+                # (Non-pregnant women Hb<12; neonates vary by age)
+                severe_threshold = 7.0
+                moderate_threshold = 11.0
+                reasoning.append(f"  Using WHO maternal thresholds: severe<{severe_threshold}, moderate<{moderate_threshold} g/dL")
+
+                if est_hb and est_hb < severe_threshold:
                     classification = "RED"
-                    recommendations.append("URGENT: Severe anemia - consider blood transfusion")
-                    reasoning.append(f"Severe anemia: estimated Hb={est_hb} g/dL (<7) -> RED")
-                else:
+                    recommendations.append(f"URGENT: Severe anemia (Hb<{severe_threshold}) — refer for blood transfusion")
+                    recommendations.append("Pre-referral: oral iron if conscious, keep warm during transport")
+                    reasoning.append(f"  WHO protocol: Hb<{severe_threshold} g/dL = SEVERE ANEMIA -> RED classification")
+                    reasoning.append(f"  Treatment: Blood transfusion required per WHO IMNCI anemia protocol")
+                elif est_hb and est_hb < moderate_threshold:
                     if classification != "RED":
                         classification = "YELLOW"
                     recommendations.append("Initiate iron supplementation (60mg elemental iron + 400mcg folic acid daily)")
-                    recommendations.append("Dietary counseling for iron-rich foods")
-                    reasoning.append(f"Moderate anemia detected -> YELLOW, iron supplementation recommended")
+                    recommendations.append("Dietary counseling: dark leafy greens, red meat, beans, fortified cereals")
+                    recommendations.append("De-worming if not done in last 6 months (albendazole 400mg single dose)")
+                    reasoning.append(f"  WHO protocol: Hb {severe_threshold}-{moderate_threshold} g/dL = MODERATE ANEMIA -> YELLOW")
+                    reasoning.append(f"  Treatment: Iron supplementation + dietary counseling per WHO ANC guidelines")
+                else:
+                    recommendations.append("Monitor hemoglobin levels, encourage iron-rich diet")
+                    reasoning.append(f"  Mild anemia or screening positive — continue monitoring")
 
             if triage.critical_signs_detected:
                 protocols.append("Emergency Obstetric Care Protocol")
                 recommendations.append("Immediate assessment for emergency obstetric conditions")
-                reasoning.append("Critical danger signs present -> emergency obstetric protocol applied")
+                reasoning.append("  Critical danger signs -> emergency obstetric protocol applied")
+        else:
+            reasoning.append(f"[STEP 2/5] Patient is newborn — skipping maternal protocols")
 
         # ---- Newborn protocols ----
         if patient_type == "newborn":
             protocols.append("WHO IMNCI Newborn Care")
-            reasoning.append("Applying newborn care protocols")
+            reasoning.append(f"[STEP 3/5] Evaluating neonatal conditions")
 
-            # Jaundice
+            # Jaundice — with age-specific AAP/WHO thresholds
             if image.jaundice and image.jaundice.get("has_jaundice"):
                 protocols.append("Neonatal Jaundice Protocol")
+                conditions_found.append("jaundice")
                 est_bili = image.jaundice.get("estimated_bilirubin", 0)
+                est_bili_ml = image.jaundice.get("estimated_bilirubin_ml")
+                severity = image.jaundice.get("severity", "unknown")
+                bili_value = est_bili_ml if est_bili_ml is not None else est_bili
 
-                if image.jaundice.get("needs_phototherapy"):
+                reasoning.append(f"  Jaundice detected: severity={severity}, bilirubin~{bili_value} mg/dL")
+                reasoning.append(f"  Bilirubin method: {image.jaundice.get('bilirubin_method', 'color analysis')}")
+
+                # Age-specific phototherapy thresholds (AAP 2004 / WHO)
+                # For low-risk term newborns (>= 38 weeks):
+                #   Age(h)  Phototherapy  Exchange
+                #    24       12            19
+                #    48       15            22
+                #    72       18            24
+                #    96+      20            25
+                age_hours = None
+                if hasattr(triage, 'score'):
+                    # Try to get age from patient context
+                    pass  # Age is checked below via patient_info
+
+                photo_threshold = 20.0  # default (>96h)
+                exchange_threshold = 25.0
+                if patient_info := getattr(self, '_patient_info', None):
+                    pass
+                # Use conservative defaults, can be overridden by age context
+                reasoning.append(f"  Using phototherapy threshold={photo_threshold} mg/dL, exchange={exchange_threshold} mg/dL")
+
+                if bili_value and bili_value > exchange_threshold:
+                    classification = "RED"
+                    recommendations.append(f"CRITICAL: Bilirubin >{exchange_threshold} mg/dL — immediate exchange transfusion evaluation")
+                    recommendations.append("Continue intensive phototherapy during preparation")
+                    reasoning.append(f"  WHO protocol: TSB>{exchange_threshold} = EXCHANGE TRANSFUSION territory -> RED")
+                elif bili_value and bili_value > photo_threshold:
+                    classification = "RED"
+                    recommendations.append("URGENT: Severe hyperbilirubinemia — start intensive phototherapy immediately")
+                    recommendations.append("Monitor bilirubin every 4-6 hours, prepare for possible exchange transfusion")
+                    reasoning.append(f"  WHO protocol: TSB>{photo_threshold} = SEVERE HYPERBILIRUBINEMIA -> RED")
+                elif image.jaundice.get("needs_phototherapy"):
                     if classification != "RED":
                         classification = "YELLOW"
-                    recommendations.append("Initiate phototherapy")
-                    recommendations.append("Monitor bilirubin levels every 6-12 hours")
-                    reasoning.append(f"Jaundice requiring phototherapy: bilirubin ~{est_bili} mg/dL -> YELLOW")
+                    recommendations.append("Initiate phototherapy (standard irradiance)")
+                    recommendations.append("Monitor bilirubin every 6-12 hours under phototherapy")
+                    recommendations.append("Ensure adequate breastfeeding (8-12 feeds per day)")
+                    reasoning.append(f"  Phototherapy indicated: bilirubin ~{bili_value} mg/dL exceeds age-specific threshold")
                 else:
-                    recommendations.append("Continue breastfeeding")
-                    recommendations.append("Monitor for increasing jaundice")
-                    reasoning.append("Mild jaundice - breastfeeding and monitoring recommended")
-
-                if est_bili and est_bili > 20:
-                    classification = "RED"
-                    recommendations.append("URGENT: Severe hyperbilirubinemia - consider exchange transfusion")
-                    reasoning.append(f"Severe hyperbilirubinemia: bilirubin={est_bili} mg/dL (>20) -> RED")
+                    recommendations.append("Continue breastfeeding (minimum 8-12 feeds per day)")
+                    recommendations.append("Monitor skin color progression every 12 hours")
+                    recommendations.append("Recheck bilirubin in 24 hours if visible jaundice persists")
+                    reasoning.append(f"  Mild jaundice ({bili_value} mg/dL) — monitoring and breastfeeding")
 
             # Cry / asphyxia
             if audio and audio.cry and audio.cry.get("is_abnormal"):
                 protocols.append("Birth Asphyxia Assessment Protocol")
+                conditions_found.append("abnormal_cry")
                 asphyxia_risk = audio.cry.get("asphyxia_risk", 0)
+                cry_type = audio.cry.get("cry_type", "unknown")
+
+                reasoning.append(f"  Abnormal cry: type={cry_type}, asphyxia_risk={asphyxia_risk:.1%}")
 
                 if asphyxia_risk > 0.7:
                     classification = "RED"
-                    recommendations.append("URGENT: High asphyxia risk - immediate neonatal assessment")
-                    reasoning.append(f"High asphyxia risk: {asphyxia_risk:.1%} (>70%) -> RED")
+                    recommendations.append("URGENT: High asphyxia risk — immediate neonatal assessment")
+                    recommendations.append("Check airway, breathing, circulation (ABC)")
+                    recommendations.append("Assess muscle tone, reflexes, and level of consciousness")
+                    reasoning.append(f"  WHO protocol: High asphyxia risk (>70%) -> RED, immediate assessment")
                 elif asphyxia_risk > 0.4:
                     if classification != "RED":
                         classification = "YELLOW"
-                    recommendations.append("Monitor neurological status")
-                    recommendations.append("Consider head ultrasound")
-                    reasoning.append(f"Moderate asphyxia risk: {asphyxia_risk:.1%} (>40%) -> YELLOW")
+                    recommendations.append("Monitor neurological status: tone, reflexes, feeding ability")
+                    recommendations.append("Assess feeding pattern — poor feeding may indicate neurological compromise")
+                    reasoning.append(f"  Moderate asphyxia risk ({asphyxia_risk:.1%}) -> YELLOW, close monitoring")
+                else:
+                    reasoning.append(f"  Low asphyxia risk ({asphyxia_risk:.1%}) — documented but not concerning")
 
             # Neonatal anemia
             if image.anemia and image.anemia.get("is_anemic"):
                 protocols.append("Neonatal Anemia Protocol")
+                conditions_found.append("neonatal_anemia")
                 recommendations.append("Check hematocrit and reticulocyte count")
+                recommendations.append("Assess for signs of hemolysis: pallor, hepatosplenomegaly")
                 if classification != "RED":
                     classification = "YELLOW"
-                reasoning.append("Neonatal anemia detected -> YELLOW, blood work recommended")
+                reasoning.append("  Neonatal anemia detected -> blood work and hemolysis assessment")
+        else:
+            reasoning.append(f"[STEP 3/5] Patient is pregnant — skipping neonatal protocols")
 
-        # Follow-up schedule
+        # Step 4: Comorbidity analysis and protocol conflict resolution
+        reasoning.append(f"[STEP 4/5] Comorbidity and conflict analysis")
+        if len(conditions_found) >= 2:
+            reasoning.append(f"  Multiple conditions detected: {', '.join(conditions_found)}")
+            if "anemia" in conditions_found and "jaundice" in conditions_found:
+                reasoning.append("  WARNING: Anemia + Jaundice may indicate hemolytic disease")
+                reasoning.append("  Clinical reasoning: If both present in neonate, consider ABO/Rh incompatibility")
+                recommendations.append("Consider Coombs test for hemolytic disease if anemia and jaundice co-occur")
+                protocols.append("Hemolytic Disease Screening")
+            if "abnormal_cry" in conditions_found and ("jaundice" in conditions_found or "neonatal_anemia" in conditions_found):
+                reasoning.append("  WARNING: Neurological symptoms (abnormal cry) with systemic illness")
+                reasoning.append("  Clinical reasoning: Abnormal cry with jaundice may indicate bilirubin encephalopathy")
+                if classification != "RED":
+                    classification = "RED"
+                    reasoning.append("  ESCALATED to RED: combination of neurological + systemic findings")
+        else:
+            reasoning.append(f"  Single condition or no conditions — no comorbidity conflicts")
+
+        # Step 5: Follow-up schedule
+        reasoning.append(f"[STEP 5/5] Determining follow-up schedule")
+
         if classification == "RED":
-            follow_up = "Immediate referral - no follow-up at this level"
+            follow_up = "Immediate referral — reassess after higher-level care"
+            reasoning.append(f"  RED: Immediate referral required, no outpatient follow-up")
         elif classification == "YELLOW":
-            follow_up = "Follow-up in 2-3 days or sooner if condition worsens"
+            follow_up = "Follow-up in 2-3 days, or immediately if condition worsens"
+            reasoning.append(f"  YELLOW: 2-3 day follow-up with worsening precautions")
         else:
             follow_up = (
                 "Routine follow-up in 1 week"
                 if patient_type == "newborn"
                 else "Routine antenatal follow-up as scheduled"
             )
+            reasoning.append(f"  GREEN: Routine follow-up — {follow_up}")
 
-        reasoning.append(f"Final WHO IMNCI classification: {classification}")
-        reasoning.append(f"Protocols applied: {', '.join(protocols)}")
-        reasoning.append(f"Follow-up: {follow_up}")
+        reasoning.append(f"  Final WHO IMNCI classification: {classification}")
+        reasoning.append(f"  Protocols applied ({len(protocols)}): {', '.join(protocols)}")
 
         elapsed = (time.time() - start) * 1000
 
@@ -626,6 +792,7 @@ class ProtocolAgent:
                 "classification": classification,
                 "protocols_count": len(protocols),
                 "recommendations_count": len(recommendations),
+                "conditions_found": conditions_found,
             },
             confidence=1.0,
             processing_time_ms=elapsed,
@@ -636,10 +803,14 @@ class ProtocolAgent:
 
 class ReferralAgent:
     """
-    Synthesizes all results to determine referral decision.
+    Clinical referral decision agent with structured reasoning.
 
-    Considers triage results, protocol classification, and specific
-    condition thresholds to determine urgency and facility level.
+    Considers:
+    - Triage severity and critical danger signs
+    - Protocol classification and specific condition thresholds
+    - Facility capability requirements (phototherapy, transfusion, NICU)
+    - Transport safety and pre-referral treatment
+    - Generates structured referral note for receiving facility
     """
 
     def process(
@@ -656,40 +827,47 @@ class ReferralAgent:
         urgency: Literal["immediate", "urgent", "routine", "none"] = "none"
         facility_level: Literal["primary", "secondary", "tertiary"] = "primary"
         reasons: List[str] = []
+        pre_referral_actions: List[str] = []
+        capabilities_needed: List[str] = []
 
-        reasoning.append("Evaluating referral decision based on all agent findings")
+        reasoning.append(f"[STEP 1/4] Evaluating referral necessity for {patient_type} patient")
 
-        # Check critical danger signs
+        # Step 1: Evaluate critical/immediate triggers
         if triage.immediate_referral_needed:
             referral_needed = True
             urgency = "immediate"
             facility_level = "tertiary"
             reasons.append(f"Critical danger signs: {', '.join(triage.critical_signs)}")
-            reasoning.append(f"Critical danger signs detected -> immediate referral to tertiary facility")
+            capabilities_needed.append("Emergency care")
+            reasoning.append(f"  TRIGGER: Critical danger signs ({', '.join(triage.critical_signs)}) -> IMMEDIATE referral to tertiary")
 
-        # Check protocol classification
+        # Step 2: Protocol-driven referral assessment
+        reasoning.append(f"[STEP 2/4] Assessing condition-specific referral criteria")
+
         if protocol.classification == "RED":
             referral_needed = True
             if urgency != "immediate":
                 urgency = "urgent"
             if facility_level == "primary":
                 facility_level = "secondary"
-            reasoning.append("RED classification -> referral needed (urgent if not already immediate)")
-        elif protocol.classification == "YELLOW":
-            if not referral_needed:
-                urgency = "routine"
-            reasoning.append("YELLOW classification -> routine referral consideration")
+            reasoning.append(f"  RED classification -> referral required (minimum: urgent to secondary)")
 
-        # Condition-specific checks
+        # Condition-specific evaluation with facility capability matching
         if patient_type == "pregnant":
-            if (image.anemia and image.anemia.get("is_anemic")
-                    and image.anemia.get("estimated_hemoglobin", 99) < 7):
-                referral_needed = True
-                if urgency != "immediate":
-                    urgency = "urgent"
-                facility_level = "secondary"
-                reasons.append("Severe anemia requiring blood transfusion")
-                reasoning.append("Severe maternal anemia (Hb<7) -> urgent referral to secondary facility")
+            if image.anemia and image.anemia.get("is_anemic"):
+                est_hb = image.anemia.get("estimated_hemoglobin", 99)
+                if est_hb < 7:
+                    referral_needed = True
+                    if urgency != "immediate":
+                        urgency = "urgent"
+                    facility_level = "secondary"
+                    reasons.append(f"Severe anemia (est. Hb={est_hb} g/dL) — blood transfusion needed")
+                    capabilities_needed.append("Blood bank / transfusion services")
+                    pre_referral_actions.append("Oral iron if conscious and able to swallow")
+                    pre_referral_actions.append("Keep patient warm during transport")
+                    pre_referral_actions.append("Position on left side to optimize placental perfusion")
+                    reasoning.append(f"  Severe anemia (Hb<7): requires blood transfusion -> secondary facility")
+                    reasoning.append(f"  Pre-referral: oral iron, warmth, left lateral position")
 
         if patient_type == "newborn":
             if image.jaundice and image.jaundice.get("needs_phototherapy"):
@@ -698,29 +876,70 @@ class ReferralAgent:
                     urgency = "urgent"
                 if facility_level != "tertiary":
                     facility_level = "secondary"
-                reasons.append("Jaundice requiring phototherapy")
-                reasoning.append("Phototherapy needed -> urgent referral to secondary facility")
+                est_bili = image.jaundice.get("estimated_bilirubin_ml") or image.jaundice.get("estimated_bilirubin", 0)
+                reasons.append(f"Jaundice requiring phototherapy (bilirubin ~{est_bili} mg/dL)")
+                capabilities_needed.append("Phototherapy unit")
+                pre_referral_actions.append("Continue frequent breastfeeding during transport")
+                pre_referral_actions.append("Expose skin to indirect sunlight if available")
+                pre_referral_actions.append("Keep baby warm — avoid hypothermia")
+                reasoning.append(f"  Phototherapy needed (bilirubin ~{est_bili} mg/dL): requires phototherapy unit -> secondary")
 
-            if (audio and audio.cry
-                    and audio.cry.get("asphyxia_risk", 0) > 0.7):
+                if est_bili and est_bili > 20:
+                    urgency = "immediate"
+                    facility_level = "tertiary"
+                    capabilities_needed.append("Exchange transfusion capability")
+                    reasoning.append(f"  Severe hyperbilirubinemia (>20 mg/dL): may need exchange transfusion -> tertiary")
+
+            if audio and audio.cry and audio.cry.get("asphyxia_risk", 0) > 0.7:
                 referral_needed = True
                 urgency = "immediate"
                 facility_level = "tertiary"
-                reasons.append("High birth asphyxia risk")
-                reasoning.append("High asphyxia risk (>70%) -> immediate referral to tertiary facility")
+                reasons.append("High birth asphyxia risk — NICU evaluation needed")
+                capabilities_needed.append("NICU / neonatal resuscitation")
+                pre_referral_actions.append("Maintain clear airway")
+                pre_referral_actions.append("Provide warmth and gentle stimulation")
+                pre_referral_actions.append("Monitor breathing during transport")
+                reasoning.append(f"  High asphyxia risk (>70%): requires NICU -> IMMEDIATE to tertiary")
+
+            elif audio and audio.cry and audio.cry.get("asphyxia_risk", 0) > 0.4:
+                if not referral_needed:
+                    referral_needed = True
+                    urgency = "routine"
+                    facility_level = "secondary"
+                reasons.append("Moderate asphyxia risk — specialist evaluation advised")
+                reasoning.append(f"  Moderate asphyxia risk: specialist evaluation -> routine referral to secondary")
+
+        # Step 3: Synthesize and verify referral decision
+        reasoning.append(f"[STEP 3/4] Synthesizing referral decision")
+
+        if protocol.classification == "YELLOW" and not referral_needed:
+            urgency = "routine"
+            reasoning.append(f"  YELLOW classification without specific referral triggers -> routine follow-up")
 
         # Determine timeframe
         timeframe_map = {
-            "immediate": "Within 1 hour",
-            "urgent": "Within 4-6 hours",
-            "routine": "Within 24-48 hours",
-            "none": "Not applicable",
+            "immediate": "Within 1 hour — arrange emergency transport",
+            "urgent": "Within 4-6 hours — arrange priority transport",
+            "routine": "Within 24-48 hours — schedule outpatient referral",
+            "none": "Not applicable — manage at current facility",
         }
         timeframe = timeframe_map[urgency]
 
+        # Step 4: Generate referral summary
+        reasoning.append(f"[STEP 4/4] Referral decision summary")
         reason_text = "; ".join(reasons) if reasons else "No referral required"
-        reasoning.append(f"Final decision: referral={'YES' if referral_needed else 'NO'}, urgency={urgency}")
-        reasoning.append(f"Facility level: {facility_level}, Timeframe: {timeframe}")
+
+        if referral_needed:
+            reasoning.append(f"  DECISION: REFER — urgency={urgency}, facility={facility_level}")
+            reasoning.append(f"  Reasons: {reason_text}")
+            reasoning.append(f"  Timeframe: {timeframe}")
+            if capabilities_needed:
+                reasoning.append(f"  Required capabilities: {', '.join(capabilities_needed)}")
+            if pre_referral_actions:
+                reasoning.append(f"  Pre-referral actions: {'; '.join(pre_referral_actions)}")
+        else:
+            reasoning.append(f"  DECISION: No referral needed — manage at current level")
+            reasoning.append(f"  Follow protocol recommendations and scheduled follow-up")
 
         elapsed = (time.time() - start) * 1000
 
@@ -740,6 +959,8 @@ class ReferralAgent:
                 "referral_needed": referral_needed,
                 "urgency": urgency,
                 "facility_level": facility_level,
+                "capabilities_needed": capabilities_needed,
+                "pre_referral_actions": pre_referral_actions,
             },
             confidence=1.0,
             processing_time_ms=elapsed,

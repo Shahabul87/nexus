@@ -59,7 +59,9 @@ app = FastAPI(
 
 # CORS middleware for mobile app
 import os as _os
-_cors_origins = _os.environ.get("CORS_ORIGINS", "*").split(",")
+# Default to localhost origins; set CORS_ORIGINS env var for production
+_cors_default = "http://localhost:3000,http://localhost:8081"
+_cors_origins = _os.environ.get("CORS_ORIGINS", _cors_default).split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -433,7 +435,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "error": "Internal Server Error",
-            "detail": str(exc),
+            "detail": "An unexpected error occurred. Check server logs for details.",
             "timestamp": datetime.now().isoformat(),
         }
     )
@@ -442,10 +444,19 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Health Check
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint — verifies model import availability."""
+    models_loaded = {
+        "anemia_detector": anemia_detector is not None,
+        "jaundice_detector": jaundice_detector is not None,
+        "cry_analyzer": cry_analyzer is not None,
+        "clinical_synthesizer": clinical_synthesizer is not None,
+    }
+    any_loaded = any(models_loaded.values())
     return {
-        "status": "healthy",
+        "status": "healthy" if MODELS_AVAILABLE else "degraded",
         "models_available": MODELS_AVAILABLE,
+        "models_loaded": models_loaded,
+        "any_model_loaded": any_loaded,
         "version": "1.0.0",
         "timestamp": datetime.now().isoformat(),
     }
@@ -486,6 +497,9 @@ async def detect_anemia(request: AnemiaRequest):
             anemia_score=result["anemia_score"],
             healthy_score=result["healthy_score"],
         )
+    except RuntimeError as e:
+        logger.error(f"Model runtime error in anemia detection: {e}")
+        raise HTTPException(status_code=503, detail="Model inference unavailable")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -527,6 +541,9 @@ async def detect_jaundice(request: JaundiceRequest):
             recommendation=result["recommendation"],
             kramer_zone=zone_info["kramer_zone"],
         )
+    except RuntimeError as e:
+        logger.error(f"Model runtime error in jaundice detection: {e}")
+        raise HTTPException(status_code=503, detail="Model inference unavailable")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -566,6 +583,9 @@ async def analyze_cry(request: CryRequest):
             recommendation=result["recommendation"],
             features=result["features"],
         )
+    except RuntimeError as e:
+        logger.error(f"Model runtime error in cry analysis: {e}")
+        raise HTTPException(status_code=503, detail="Model inference unavailable")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -589,33 +609,42 @@ async def combined_assessment(request: CombinedRequest):
 
         # Analyze conjunctiva if provided
         if request.conjunctiva_image:
-            image_data = base64.b64decode(request.conjunctiva_image)
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                tmp.write(image_data)
-                tmp_path = tmp.name
-                temp_files.append(tmp_path)
-            detector = get_anemia_detector()
-            findings["anemia"] = detector.detect(tmp_path)
+            try:
+                image_data = base64.b64decode(request.conjunctiva_image)
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    tmp.write(image_data)
+                    tmp_path = tmp.name
+                    temp_files.append(tmp_path)
+                detector = get_anemia_detector()
+                findings["anemia"] = detector.detect(tmp_path)
+            except Exception as e:
+                logger.warning(f"Anemia detection failed: {e}")
 
         # Analyze skin if provided
         if request.skin_image:
-            image_data = base64.b64decode(request.skin_image)
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                tmp.write(image_data)
-                tmp_path = tmp.name
-                temp_files.append(tmp_path)
-            detector = get_jaundice_detector()
-            findings["jaundice"] = detector.detect(tmp_path)
+            try:
+                image_data = base64.b64decode(request.skin_image)
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    tmp.write(image_data)
+                    tmp_path = tmp.name
+                    temp_files.append(tmp_path)
+                detector = get_jaundice_detector()
+                findings["jaundice"] = detector.detect(tmp_path)
+            except Exception as e:
+                logger.warning(f"Jaundice detection failed: {e}")
 
         # Analyze cry if provided
         if request.cry_audio:
-            audio_data = base64.b64decode(request.cry_audio)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp.write(audio_data)
-                tmp_path = tmp.name
-                temp_files.append(tmp_path)
-            analyzer = get_cry_analyzer()
-            findings["cry"] = analyzer.analyze(tmp_path)
+            try:
+                audio_data = base64.b64decode(request.cry_audio)
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp.write(audio_data)
+                    tmp_path = tmp.name
+                    temp_files.append(tmp_path)
+                analyzer = get_cry_analyzer()
+                findings["cry"] = analyzer.analyze(tmp_path)
+            except Exception as e:
+                logger.warning(f"Cry analysis failed: {e}")
 
         # Clinical synthesis
         synthesizer = get_clinical_synthesizer()
@@ -683,6 +712,9 @@ async def synthesize_findings(request: SynthesizeRequest):
             confidence=0.85 if synthesis.get("model", "").startswith("MedGemma") else 0.75,
             model=synthesis.get("model", "Unknown"),
         )
+    except RuntimeError as e:
+        logger.error(f"Model runtime error in synthesis: {e}")
+        raise HTTPException(status_code=503, detail="Model inference unavailable")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -764,12 +796,12 @@ async def agentic_assessment(request: AgenticRequest):
             cry_audio=cry_path,
         )
 
-        # Create engine with existing model instances
+        # Create engine with lazily-loaded model instances (not the raw globals)
         engine = AgenticWorkflowEngine(
-            anemia_detector=anemia_detector,
-            jaundice_detector=jaundice_detector,
-            cry_analyzer=cry_analyzer,
-            synthesizer=clinical_synthesizer,
+            anemia_detector=get_anemia_detector() if MODELS_AVAILABLE else None,
+            jaundice_detector=get_jaundice_detector() if MODELS_AVAILABLE else None,
+            cry_analyzer=get_cry_analyzer() if MODELS_AVAILABLE else None,
+            synthesizer=get_clinical_synthesizer() if MODELS_AVAILABLE else None,
         )
 
         result = engine.execute(workflow_input)

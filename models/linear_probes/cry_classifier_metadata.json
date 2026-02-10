@@ -1,0 +1,31 @@
+{
+  "model_type": "SVM_RBF",
+  "embedding_source": "HeAR (google/hear-pytorch)",
+  "embedding_dim": 512,
+  "num_classes": 5,
+  "classes": {
+    "belly_pain": 0,
+    "burping": 1,
+    "discomfort": 2,
+    "hungry": 3,
+    "tired": 4
+  },
+  "cv_accuracy_mean": 0.8380793119923554,
+  "cv_accuracy_std": 0.008077431438521396,
+  "num_samples": 457,
+  "all_results": {
+    "LogisticRegression": {
+      "mean_accuracy": 0.7985905398948876,
+      "std_accuracy": 0.028055714127978745
+    },
+    "SVM_RBF": {
+      "mean_accuracy": 0.8380793119923554,
+      "std_accuracy": 0.008077431438521396
+    },
+    "SVM_Linear": {
+      "mean_accuracy": 0.765862398471094,
+      "std_accuracy": 0.013071624843302853
+    }
+  },
+  "seed": 42
+}

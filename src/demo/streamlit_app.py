@@ -13,6 +13,7 @@ HAI-DEF Models Used:
 import streamlit as st
 from pathlib import Path
 import sys
+import os
 import tempfile
 import json
 
@@ -67,61 +68,97 @@ st.markdown("""
         border-radius: 10px;
         text-align: center;
     }
+    .model-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: white;
+        letter-spacing: 0.3px;
+    }
+    .stMetric > div {
+        background-color: #f8f9fa;
+        padding: 0.5rem;
+        border-radius: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
 @st.cache_resource
 def load_anemia_detector():
-    """Load anemia detector model."""
-    from nexus.anemia_detector import AnemiaDetector
-    return AnemiaDetector()
+    """Load anemia detector model with error handling."""
+    try:
+        from nexus.anemia_detector import AnemiaDetector
+        detector = AnemiaDetector()
+        return detector, None
+    except Exception as e:
+        return None, str(e)
 
 
 @st.cache_resource
 def load_jaundice_detector():
-    """Load jaundice detector model."""
-    from nexus.jaundice_detector import JaundiceDetector
-    return JaundiceDetector()
+    """Load jaundice detector model with error handling."""
+    try:
+        from nexus.jaundice_detector import JaundiceDetector
+        detector = JaundiceDetector()
+        return detector, None
+    except Exception as e:
+        return None, str(e)
 
 
 @st.cache_resource
 def load_cry_analyzer():
-    """Load cry analyzer."""
-    from nexus.cry_analyzer import CryAnalyzer
-    return CryAnalyzer()
+    """Load cry analyzer with error handling."""
+    try:
+        from nexus.cry_analyzer import CryAnalyzer
+        analyzer = CryAnalyzer()
+        return analyzer, None
+    except Exception as e:
+        return None, str(e)
 
 
 @st.cache_resource
 def load_clinical_synthesizer():
-    """Load clinical synthesizer (MedGemma)."""
-    import os
-    from nexus.clinical_synthesizer import ClinicalSynthesizer
-    use_medgemma = os.environ.get("NEXUS_USE_MEDGEMMA", "true").lower() != "false"
-    return ClinicalSynthesizer(use_medgemma=use_medgemma)
+    """Load clinical synthesizer (MedGemma) with error handling."""
+    try:
+        import os
+        from nexus.clinical_synthesizer import ClinicalSynthesizer
+        use_medgemma = os.environ.get("NEXUS_USE_MEDGEMMA", "true").lower() != "false"
+        synthesizer = ClinicalSynthesizer(use_medgemma=use_medgemma)
+        return synthesizer, None
+    except Exception as e:
+        return None, str(e)
 
 
 def get_hai_def_info():
-    """Get HAI-DEF models information."""
+    """Get HAI-DEF models information with validated accuracy numbers."""
     return {
         "MedSigLIP": {
             "name": "MedSigLIP (google/medsiglip-448)",
-            "use": "Image analysis for anemia and jaundice detection",
-            "method": "Zero-shot classification with medical prompts",
-            "accuracy": "80-98% expected"
+            "use": "Image analysis for anemia and jaundice detection + bilirubin regression",
+            "method": "Zero-shot classification (max-similarity, 8 prompts/class) + trained SVM/LR classifiers on embeddings",
+            "accuracy": "Anemia: trained classifier on augmented data, Jaundice: trained classifier on 2,235 images, Bilirubin: MAE 2.67 mg/dL (r=0.77)",
+            "badge": "Vision",
+            "badge_color": "#388e3c",
         },
         "HeAR": {
             "name": "HeAR (google/hear-pytorch)",
-            "use": "Infant cry analysis for asphyxia detection",
-            "method": "Health acoustic embeddings + classification",
-            "accuracy": "85-93% expected"
+            "use": "Infant cry analysis for asphyxia and cry type classification",
+            "method": "512-dim health acoustic embeddings + trained linear classifier on donate-a-cry dataset (5-class: hungry, belly_pain, burping, discomfort, tired)",
+            "accuracy": "Trained cry type classifier with asphyxia risk derivation from distress patterns",
+            "badge": "Audio",
+            "badge_color": "#f57c00",
         },
         "MedGemma": {
-            "name": "MedGemma 4B (google/medgemma-4b-it)",
+            "name": "MedGemma 1.5 4B (google/medgemma-1.5-4b-it)",
             "use": "Clinical reasoning and recommendation synthesis",
-            "method": "WHO IMNCI protocol-based synthesis",
-            "accuracy": "Rule-based clinical guidelines"
-        }
+            "method": "4-bit NF4 quantized inference with WHO IMNCI protocol-aligned synthesis and 6-agent reasoning traces",
+            "accuracy": "Protocol-aligned clinical recommendations with structured reasoning chains",
+            "badge": "Language",
+            "badge_color": "#1976d2",
+        },
     }
 
 
@@ -175,9 +212,9 @@ def main():
         st.markdown("---")
         st.markdown("### HAI-DEF Models")
         st.markdown("""
-        - **MedSigLIP**: Vision
-        - **HeAR**: Audio
-        - **MedGemma**: Clinical AI
+        - **MedSigLIP**: Vision (trained classifiers)
+        - **HeAR**: Audio (trained cry classifier)
+        - **MedGemma 1.5**: Clinical AI (4-bit NF4)
         """)
 
     # Show Edge AI banner when enabled
@@ -240,10 +277,45 @@ def render_edge_ai_banner():
         """)
 
 
+def _cleanup_temp(path: str) -> None:
+    """Safely remove a temporary file."""
+    try:
+        if path and os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
+
+
+def _save_upload_to_temp(uploaded_file, suffix: str) -> str:
+    """Save an uploaded file to a temporary path and return the path."""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp.write(uploaded_file.getvalue())
+        tmp.close()
+        return tmp.name
+    except Exception:
+        tmp.close()
+        _cleanup_temp(tmp.name)
+        raise
+
+
+def _model_badge(name: str, color: str) -> str:
+    """Return an HTML badge for displaying which HAI-DEF model is active."""
+    return (
+        f'<span style="background:{color}; color:white; padding:2px 10px; '
+        f'border-radius:12px; font-size:0.78rem; font-weight:600; '
+        f'letter-spacing:0.3px;">{name}</span>'
+    )
+
+
 def render_anemia_screening():
     """Render anemia screening interface."""
     st.header("Maternal Anemia Screening")
-    st.markdown("Upload a clear image of the inner eyelid (conjunctiva) for anemia screening.")
+    st.markdown(
+        f"Upload a clear image of the inner eyelid (conjunctiva) for anemia screening. "
+        f'{_model_badge("MedSigLIP", "#388e3c")}',
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns([1, 1])
 
@@ -263,13 +335,14 @@ def render_anemia_screening():
 
         if uploaded_file:
             with st.spinner("Analyzing image..."):
+                tmp_path = None
                 try:
-                    detector = load_anemia_detector()
+                    detector, load_err = load_anemia_detector()
+                    if detector is None:
+                        st.error(f"Could not load model: {load_err}")
+                        return
 
-                    # Save uploaded file temporarily
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        tmp.write(uploaded_file.getvalue())
-                        tmp_path = tmp.name
+                    tmp_path = _save_upload_to_temp(uploaded_file, ".jpg")
 
                     result = detector.detect(tmp_path)
                     color_info = detector.analyze_color_features(tmp_path)
@@ -309,6 +382,8 @@ def render_anemia_screening():
 
                 except Exception as e:
                     st.error(f"Error analyzing image: {e}")
+                finally:
+                    _cleanup_temp(tmp_path)
         else:
             st.info("👆 Upload an image to begin analysis")
 
@@ -316,7 +391,11 @@ def render_anemia_screening():
 def render_jaundice_detection():
     """Render jaundice detection interface."""
     st.header("Neonatal Jaundice Detection")
-    st.markdown("Upload an image of the newborn's skin or sclera for jaundice assessment.")
+    st.markdown(
+        f"Upload an image of the newborn's skin or sclera for jaundice assessment. "
+        f'{_model_badge("MedSigLIP", "#388e3c")}',
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns([1, 1])
 
@@ -341,12 +420,14 @@ def render_jaundice_detection():
 
         if uploaded_file:
             with st.spinner("Analyzing image..."):
+                tmp_path = None
                 try:
-                    detector = load_jaundice_detector()
+                    detector, load_err = load_jaundice_detector()
+                    if detector is None:
+                        st.error(f"Could not load model: {load_err}")
+                        return
 
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        tmp.write(uploaded_file.getvalue())
-                        tmp_path = tmp.name
+                    tmp_path = _save_upload_to_temp(uploaded_file, ".jpg")
 
                     result = detector.detect(tmp_path)
                     zone_info = detector.analyze_kramer_zones(tmp_path)
@@ -364,10 +445,13 @@ def render_jaundice_detection():
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
-                    # Metrics
+                    # Metrics - show ML bilirubin if available
                     col_a, col_b, col_c = st.columns(3)
                     with col_a:
-                        st.metric("Est. Bilirubin", f"{result['estimated_bilirubin']} mg/dL")
+                        bili_value = result.get('estimated_bilirubin_ml', result.get('estimated_bilirubin', 0))
+                        bili_method = result.get('bilirubin_method', 'Color Analysis')
+                        st.metric("Est. Bilirubin", f"{bili_value} mg/dL")
+                        st.caption(f"Method: {bili_method}")
                     with col_b:
                         st.metric("Severity", result['severity'].upper())
                     with col_c:
@@ -387,8 +471,24 @@ def render_jaundice_detection():
                         st.write(f"**Yellow Index**: {zone_info['yellow_index']}")
                         st.progress(min(zone_info['yellow_index'] * 2, 1.0))
 
+                    # Technical details
+                    with st.expander("Technical Details"):
+                        details = {
+                            "jaundice_score": round(result["jaundice_score"], 3),
+                            "confidence": round(result["confidence"], 3),
+                            "model": result.get("model", "unknown"),
+                            "model_type": result.get("model_type", "unknown"),
+                            "bilirubin_method": result.get("bilirubin_method", "Color Analysis"),
+                        }
+                        if result.get("estimated_bilirubin_ml") is not None:
+                            details["bilirubin_ml"] = result["estimated_bilirubin_ml"]
+                            details["bilirubin_color"] = result["estimated_bilirubin"]
+                        st.json(details)
+
                 except Exception as e:
                     st.error(f"Error analyzing image: {e}")
+                finally:
+                    _cleanup_temp(tmp_path)
         else:
             st.info("👆 Upload an image to begin analysis")
 
@@ -396,7 +496,11 @@ def render_jaundice_detection():
 def render_cry_analysis():
     """Render cry analysis interface."""
     st.header("Infant Cry Analysis")
-    st.markdown("Upload an audio recording of the infant's cry for analysis.")
+    st.markdown(
+        f"Upload an audio recording of the infant's cry for analysis. "
+        f'{_model_badge("HeAR", "#f57c00")}',
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns([1, 1])
 
@@ -416,12 +520,14 @@ def render_cry_analysis():
 
         if uploaded_file:
             with st.spinner("Analyzing cry..."):
+                tmp_path = None
                 try:
-                    analyzer = load_cry_analyzer()
+                    analyzer, load_err = load_cry_analyzer()
+                    if analyzer is None:
+                        st.error(f"Could not load model: {load_err}")
+                        return
 
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                        tmp.write(uploaded_file.getvalue())
-                        tmp_path = tmp.name
+                    tmp_path = _save_upload_to_temp(uploaded_file, ".wav")
 
                     result = analyzer.analyze(tmp_path)
 
@@ -455,6 +561,8 @@ def render_cry_analysis():
 
                 except Exception as e:
                     st.error(f"Error analyzing audio: {e}")
+                finally:
+                    _cleanup_temp(tmp_path)
         else:
             st.info("👆 Upload an audio file to begin analysis")
 
@@ -462,18 +570,22 @@ def render_cry_analysis():
 def render_combined_assessment():
     """Render combined assessment interface using Clinical Synthesizer."""
     st.header("Combined Clinical Assessment")
-    st.markdown("""
-    Upload multiple inputs for a comprehensive assessment using **MedGemma Clinical Synthesizer**.
-    This combines findings from all HAI-DEF models to provide integrated clinical recommendations.
-    """)
+    st.markdown(
+        f"Upload multiple inputs for a comprehensive assessment using **MedGemma Clinical Synthesizer**. "
+        f"This combines findings from all HAI-DEF models to provide integrated clinical recommendations. "
+        f'{_model_badge("MedSigLIP", "#388e3c")} '
+        f'{_model_badge("HeAR", "#f57c00")} '
+        f'{_model_badge("MedGemma", "#1976d2")}',
+        unsafe_allow_html=True,
+    )
 
-    # Initialize session state for findings
-    if "findings" not in st.session_state:
-        st.session_state.findings = {
-            "anemia": None,
-            "jaundice": None,
-            "cry": None
-        }
+    # Reset findings each time this tab is rendered to prevent
+    # stale data from previous patients contaminating results
+    st.session_state.findings = {
+        "anemia": None,
+        "jaundice": None,
+        "cry": None
+    }
 
     col1, col2, col3 = st.columns(3)
 
@@ -488,10 +600,13 @@ def render_combined_assessment():
             st.image(anemia_file, use_container_width=True)
             with st.spinner("Analyzing..."):
                 try:
-                    detector = load_anemia_detector()
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        tmp.write(anemia_file.getvalue())
-                        result = detector.detect(tmp.name)
+                    detector, load_err = load_anemia_detector()
+                    if detector is None:
+                        st.error(f"Model error: {load_err}")
+                    else:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                            tmp.write(anemia_file.getvalue())
+                            result = detector.detect(tmp.name)
                         st.session_state.findings["anemia"] = result
                         if result["is_anemic"]:
                             st.error(f"Anemia: {result['risk_level'].upper()}")
@@ -511,15 +626,18 @@ def render_combined_assessment():
             st.image(jaundice_file, use_container_width=True)
             with st.spinner("Analyzing..."):
                 try:
-                    detector = load_jaundice_detector()
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        tmp.write(jaundice_file.getvalue())
-                        result = detector.detect(tmp.name)
-                        st.session_state.findings["jaundice"] = result
-                        if result["has_jaundice"]:
-                            st.warning(f"Jaundice: {result['severity'].upper()}")
-                        else:
-                            st.success("No Jaundice")
+                    detector, load_err = load_jaundice_detector()
+                    if detector is None:
+                        st.error(f"Model error: {load_err}")
+                    else:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                            tmp.write(jaundice_file.getvalue())
+                            result = detector.detect(tmp.name)
+                            st.session_state.findings["jaundice"] = result
+                            if result["has_jaundice"]:
+                                st.warning(f"Jaundice: {result['severity'].upper()}")
+                            else:
+                                st.success("No Jaundice")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -534,7 +652,10 @@ def render_combined_assessment():
             st.audio(cry_file)
             with st.spinner("Analyzing..."):
                 try:
-                    analyzer = load_cry_analyzer()
+                    analyzer, load_err = load_cry_analyzer()
+                    if analyzer is None:
+                        st.error(f"Model error: {load_err}")
+                        raise RuntimeError(load_err)
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                         tmp.write(cry_file.getvalue())
                         result = analyzer.analyze(tmp.name)
@@ -557,7 +678,10 @@ def render_combined_assessment():
         if st.button("Generate Clinical Synthesis", type="primary"):
             with st.spinner("Synthesizing findings with MedGemma..."):
                 try:
-                    synthesizer = load_clinical_synthesizer()
+                    synthesizer, load_err = load_clinical_synthesizer()
+                    if synthesizer is None:
+                        st.error(f"Could not load synthesizer: {load_err}")
+                        return
 
                     # Prepare findings dict
                     findings = {}
@@ -611,11 +735,17 @@ def render_combined_assessment():
 
                     # Technical details
                     with st.expander("Technical Details"):
+                        model_name = synthesis.get("model", "unknown")
                         st.json({
-                            "model": synthesis.get("model"),
+                            "model": model_name,
+                            "model_id": synthesis.get("model_id", ""),
                             "generated_at": synthesis.get("generated_at"),
                             "urgent_conditions": synthesis.get("urgent_conditions", []),
                         })
+                        if model_name and "Fallback" not in str(model_name):
+                            st.success(f"Synthesis powered by {model_name}")
+                        elif "Fallback" in str(model_name):
+                            st.warning("Using rule-based fallback (MedGemma unavailable)")
 
                 except Exception as e:
                     st.error(f"Error generating synthesis: {e}")
@@ -644,11 +774,13 @@ def render_hai_def_info():
         st.markdown(f"**Model**: {info['name']}")
         st.markdown(f"**Use Case**: {info['use']}")
         st.markdown(f"**Method**: {info['method']}")
-        st.markdown(f"**Expected Accuracy**: {info['accuracy']}")
+        st.markdown(f"**Validated Performance**: {info['accuracy']}")
         st.markdown("""
         MedSigLIP enables zero-shot medical image classification using
-        text prompts, allowing detection of conditions without requiring
-        large labeled training datasets.
+        text prompts. NEXUS extends this with trained SVM/LR classifiers
+        on MedSigLIP embeddings (with data augmentation) for improved
+        accuracy, plus a novel 3-layer MLP regression head for continuous
+        bilirubin prediction from frozen embeddings.
         """)
 
     # HeAR
@@ -662,11 +794,13 @@ def render_hai_def_info():
         st.markdown(f"**Model**: {info['name']}")
         st.markdown(f"**Use Case**: {info['use']}")
         st.markdown(f"**Method**: {info['method']}")
-        st.markdown(f"**Expected Accuracy**: {info['accuracy']}")
+        st.markdown(f"**Validated Performance**: {info['accuracy']}")
         st.markdown("""
-        HeAR (Health Acoustic Representations) analyzes audio signals
-        for health indicators. In NEXUS, it analyzes infant cry patterns
-        to detect potential birth asphyxia.
+        HeAR (Health Acoustic Representations) produces 512-dim embeddings
+        from 2-second audio clips at 16kHz. NEXUS trains a linear classifier
+        on HeAR embeddings for 5-class cry type classification (hungry,
+        belly_pain, burping, discomfort, tired) and derives asphyxia risk
+        from distress patterns.
         """)
 
     # MedGemma
@@ -674,17 +808,18 @@ def render_hai_def_info():
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown("### 🧠 MedGemma")
-        st.info("google/medgemma-4b-it\n\nHAI-DEF Language Model")
+        st.info("google/medgemma-1.5-4b-it\n\nHAI-DEF Language Model")
     with col2:
         info = hai_def["MedGemma"]
         st.markdown(f"**Model**: {info['name']}")
         st.markdown(f"**Use Case**: {info['use']}")
         st.markdown(f"**Method**: {info['method']}")
-        st.markdown(f"**Expected Accuracy**: {info['accuracy']}")
+        st.markdown(f"**Validated Performance**: {info['accuracy']}")
         st.markdown("""
-        MedGemma provides clinical reasoning capabilities, synthesizing
-        multiple findings into actionable recommendations following
-        WHO IMNCI protocols for maternal and neonatal care.
+        MedGemma 1.5 provides clinical reasoning capabilities via 4-bit NF4
+        quantized inference (~2 GB VRAM). It synthesizes multi-modal findings
+        into actionable recommendations following WHO IMNCI protocols,
+        producing structured reasoning chains within the 6-agent pipeline.
         """)
 
     # Competition Info
@@ -707,10 +842,14 @@ def render_hai_def_info():
 def render_agentic_workflow():
     """Render the agentic workflow interface with reasoning traces."""
     st.header("Agentic Clinical Workflow")
-    st.markdown("""
-    **6-Agent Pipeline** with step-by-step reasoning traces.
-    Each agent explains its clinical decision process, providing a full audit trail.
-    """)
+    st.markdown(
+        f"**6-Agent Pipeline** with step-by-step reasoning traces. "
+        f"Each agent explains its clinical decision process, providing a full audit trail. "
+        f'{_model_badge("MedSigLIP", "#388e3c")} '
+        f'{_model_badge("HeAR", "#f57c00")} '
+        f'{_model_badge("MedGemma", "#1976d2")}',
+        unsafe_allow_html=True,
+    )
 
     # Pipeline diagram
     st.markdown("""
@@ -805,25 +944,23 @@ def render_agentic_workflow():
                         WorkflowInput,
                     )
 
-                    # Save uploaded files
+                    # Save uploaded files (track for cleanup)
+                    _temp_paths = []
                     conjunctiva_path = None
                     skin_path = None
                     cry_path = None
 
                     if conjunctiva_file:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                            tmp.write(conjunctiva_file.getvalue())
-                            conjunctiva_path = tmp.name
+                        conjunctiva_path = _save_upload_to_temp(conjunctiva_file, ".jpg")
+                        _temp_paths.append(conjunctiva_path)
 
                     if skin_file:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                            tmp.write(skin_file.getvalue())
-                            skin_path = tmp.name
+                        skin_path = _save_upload_to_temp(skin_file, ".jpg")
+                        _temp_paths.append(skin_path)
 
                     if cry_file:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                            tmp.write(cry_file.getvalue())
-                            cry_path = tmp.name
+                        cry_path = _save_upload_to_temp(cry_file, ".wav")
+                        _temp_paths.append(cry_path)
 
                     # Build workflow input
                     signs = [
@@ -844,8 +981,18 @@ def render_agentic_workflow():
                         cry_audio=cry_path,
                     )
 
-                    # Run workflow (lazy-load models)
-                    engine = AgenticWorkflowEngine()
+                    # Run workflow — reuse cached model instances when available
+                    anemia_det, _ = load_anemia_detector()
+                    jaundice_det, _ = load_jaundice_detector()
+                    cry_ana, _ = load_cry_analyzer()
+                    synth, _ = load_clinical_synthesizer()
+
+                    engine = AgenticWorkflowEngine(
+                        anemia_detector=anemia_det,
+                        jaundice_detector=jaundice_det,
+                        cry_analyzer=cry_ana,
+                        synthesizer=synth,
+                    )
                     result = engine.execute(workflow_input)
 
                     st.session_state["agentic_result"] = result
@@ -853,6 +1000,9 @@ def render_agentic_workflow():
 
                 except Exception as e:
                     st.error(f"Workflow error: {e}")
+                finally:
+                    for p in _temp_paths:
+                        _cleanup_temp(p)
 
     # Results display
     if "agentic_result" in st.session_state:
@@ -897,57 +1047,115 @@ def render_agentic_workflow():
             for action in result.immediate_actions:
                 st.markdown(f"- {action}")
 
-        # Agent reasoning traces (the key feature for Agentic Workflow prize)
+        # Visual pipeline flow with status indicators
+        st.markdown("---")
+        st.subheader("Agent Pipeline Execution")
+
+        agent_meta = {
+            "TriageAgent": {"color": "#1976d2", "bg": "#e3f2fd", "icon": "1", "label": "Triage"},
+            "ImageAnalysisAgent": {"color": "#388e3c", "bg": "#e8f5e9", "icon": "2", "label": "Image (MedSigLIP)"},
+            "AudioAnalysisAgent": {"color": "#f57c00", "bg": "#fff3e0", "icon": "3", "label": "Audio (HeAR)"},
+            "ProtocolAgent": {"color": "#7b1fa2", "bg": "#f3e5f5", "icon": "4", "label": "WHO Protocol"},
+            "ReferralAgent": {"color": "#c62828", "bg": "#fce4ec", "icon": "5", "label": "Referral"},
+            "SynthesisAgent": {"color": "#00838f", "bg": "#e0f7fa", "icon": "6", "label": "Synthesis (MedGemma)"},
+        }
+        status_symbols = {"success": "OK", "skipped": "SKIP", "error": "ERR"}
+
+        # Build trace lookup
+        trace_lookup = {t.agent_name: t for t in result.agent_traces}
+
+        # Pipeline status bar
+        pipeline_html_parts = []
+        for agent_name, meta in agent_meta.items():
+            trace = trace_lookup.get(agent_name)
+            if trace:
+                status_sym = status_symbols.get(trace.status, "?")
+                opacity = "1.0" if trace.status == "success" else "0.5"
+                border_style = f"3px solid {meta['color']}" if trace.status == "success" else "2px dashed #999"
+                time_label = f"{trace.processing_time_ms:.0f}ms"
+            else:
+                status_sym = "---"
+                opacity = "0.3"
+                border_style = "2px dashed #ccc"
+                time_label = ""
+
+            pipeline_html_parts.append(f"""
+            <div style="background: {meta['bg']}; padding: 0.4rem 0.7rem; border-radius: 8px;
+                        border: {border_style}; opacity: {opacity}; text-align: center; min-width: 90px;">
+                <div style="font-weight: bold; font-size: 0.8rem; color: {meta['color']};">{meta['label']}</div>
+                <div style="font-size: 0.7rem; color: #666;">{status_sym} {time_label}</div>
+            </div>
+            """)
+
+        pipeline_html = '<div style="display: flex; align-items: center; justify-content: center; gap: 0.3rem; flex-wrap: wrap; margin: 0.5rem 0;">'
+        for i, part in enumerate(pipeline_html_parts):
+            pipeline_html += part
+            if i < len(pipeline_html_parts) - 1:
+                pipeline_html += '<span style="font-size: 1.2rem; color: #999;">&#8594;</span>'
+        pipeline_html += "</div>"
+        st.markdown(pipeline_html, unsafe_allow_html=True)
+
+        # Agent reasoning traces (key feature for Agentic Workflow prize)
         st.markdown("---")
         st.subheader("Agent Reasoning Traces")
 
-        agent_colors = {
-            "TriageAgent": "#e3f2fd",
-            "ImageAnalysisAgent": "#e8f5e9",
-            "AudioAnalysisAgent": "#fff3e0",
-            "ProtocolAgent": "#f3e5f5",
-            "ReferralAgent": "#fce4ec",
-            "SynthesisAgent": "#e0f7fa",
-        }
-        status_icons = {
-            "success": "&#9989;",
-            "skipped": "&#9940;",
-            "error": "&#10060;",
-        }
-
         for trace in result.agent_traces:
-            color = agent_colors.get(trace.agent_name, "#f5f5f5")
-            icon = status_icons.get(trace.status, "&#8226;")
+            meta = agent_meta.get(trace.agent_name, {"color": "#666", "bg": "#f5f5f5", "label": trace.agent_name})
+            status_emoji = {"success": "OK", "skipped": "SKIP", "error": "ERR"}.get(trace.status, "?")
 
-            with st.expander(
-                f"{trace.agent_name} ({trace.status}) - {trace.processing_time_ms:.1f}ms",
-                expanded=(trace.status == "success"),
-            ):
+            header_label = f"{meta['label']} [{status_emoji}] - {trace.confidence:.0%} confidence - {trace.processing_time_ms:.0f}ms"
+            with st.expander(header_label, expanded=(trace.status == "success")):
+                # Status bar
                 st.markdown(f"""
-                <div style="background: {color}; padding: 1rem; border-radius: 8px;">
-                    <strong>Status:</strong> {icon} {trace.status} &nbsp;|&nbsp;
-                    <strong>Confidence:</strong> {trace.confidence:.1%} &nbsp;|&nbsp;
-                    <strong>Time:</strong> {trace.processing_time_ms:.1f}ms
+                <div style="background: {meta['bg']}; padding: 0.8rem 1rem; border-radius: 8px;
+                            border-left: 4px solid {meta['color']}; margin-bottom: 0.5rem;">
+                    <strong style="color: {meta['color']};">{trace.agent_name}</strong> &nbsp;|&nbsp;
+                    Status: <strong>{trace.status}</strong> &nbsp;|&nbsp;
+                    Confidence: <strong>{trace.confidence:.1%}</strong> &nbsp;|&nbsp;
+                    Time: <strong>{trace.processing_time_ms:.1f}ms</strong>
                 </div>
                 """, unsafe_allow_html=True)
 
-                st.markdown("**Reasoning Steps:**")
-                for i, step in enumerate(trace.reasoning, 1):
-                    st.markdown(f"{i}. {step}")
+                # Reasoning steps with numbered styling
+                if trace.reasoning:
+                    st.markdown("**Reasoning Chain:**")
+                    for i, step in enumerate(trace.reasoning, 1):
+                        st.markdown(f"**Step {i}.** {step}")
 
+                # Key findings
                 if trace.findings:
                     st.markdown("**Key Findings:**")
                     st.json(trace.findings)
 
-        # Processing time chart
+        # Processing time breakdown
         st.markdown("---")
-        st.subheader("Processing Time by Agent")
-        import pandas as pd
-        chart_data = pd.DataFrame({
-            "Agent": [t.agent_name for t in result.agent_traces],
-            "Time (ms)": [t.processing_time_ms for t in result.agent_traces],
-        })
-        st.bar_chart(chart_data.set_index("Agent"))
+        col_chart, col_summary = st.columns([2, 1])
+
+        with col_chart:
+            st.subheader("Processing Time by Agent")
+            import pandas as pd
+            chart_data = pd.DataFrame({
+                "Agent": [agent_meta.get(t.agent_name, {}).get("label", t.agent_name) for t in result.agent_traces],
+                "Time (ms)": [t.processing_time_ms for t in result.agent_traces],
+            })
+            st.bar_chart(chart_data.set_index("Agent"))
+
+        with col_summary:
+            st.subheader("Workflow Summary")
+            total_time = result.processing_time_ms
+            successful = sum(1 for t in result.agent_traces if t.status == "success")
+            skipped = sum(1 for t in result.agent_traces if t.status == "skipped")
+            errors = sum(1 for t in result.agent_traces if t.status == "error")
+            st.markdown(f"""
+            | Metric | Value |
+            |--------|-------|
+            | Total agents | {len(result.agent_traces)} |
+            | Successful | {successful} |
+            | Skipped | {skipped} |
+            | Errors | {errors} |
+            | Total time | {total_time:.0f} ms |
+            | Avg per agent | {total_time / max(len(result.agent_traces), 1):.0f} ms |
+            """)
 
         # Referral details
         if result.referral_result and result.referral_result.referral_needed:

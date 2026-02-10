@@ -72,6 +72,9 @@ htmlcov/
 .tox/
 .nox/
 
+# Windows artifacts
+nul
+
 # OS
 .DS_Store
 .DS_Store?

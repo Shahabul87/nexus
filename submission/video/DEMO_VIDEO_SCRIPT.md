@@ -40,9 +40,9 @@
 
 ### NEXUS OVERVIEW (0:35 - 0:55)
 
-**[VISUAL: Streamlit HAI-DEF Models Info tab]**
+**[VISUAL: Streamlit HAI-DEF Models Info tab showing 3 model cards with badges]**
 
-> "NEXUS uses three Google HAI-DEF models working together. MedSigLIP analyzes conjunctiva and skin images. HeAR processes infant cry audio. And MedGemma provides clinical reasoning, synthesizing findings into WHO protocol-aligned recommendations."
+> "NEXUS uses three Google HAI-DEF models working together. MedSigLIP analyzes conjunctiva and skin images with trained classifiers and a novel bilirubin regression head. HeAR produces 512-dimensional embeddings for cry type classification. And MedGemma 1.5, running in 4-bit quantized mode, provides clinical reasoning."
 
 ---
 
@@ -54,7 +54,7 @@
 
 **[ACTION: Upload sample conjunctiva image]**
 
-> "MedSigLIP performs zero-shot classification using medical text prompts. Within seconds: anemia risk score, estimated hemoglobin, severity level, and a clinical recommendation."
+> "MedSigLIP performs classification using trained SVM classifiers on its embeddings, enhanced with data augmentation. Within seconds: anemia risk score, estimated hemoglobin, severity level, and a clinical recommendation."
 
 **[VISUAL: Show results with confidence scores]**
 
@@ -72,7 +72,7 @@
 
 **[VISUAL: Navigate to Cry Analysis tab, upload audio]**
 
-> "A 5-second cry recording is processed by HeAR for birth asphyxia indicators."
+> "A 5-second cry recording is processed by HeAR, which extracts 512-dimensional embeddings. A trained classifier identifies the cry type -- hungry, pain, discomfort, burping, or tired -- and derives asphyxia risk from distress patterns."
 
 ---
 
@@ -84,7 +84,7 @@
 
 **[ACTION: Configure patient, upload image, run workflow]**
 
-> "The Triage Agent scores danger signs. The Image Analysis Agent invokes MedSigLIP. The Audio Agent uses HeAR. The Protocol Agent maps findings to WHO IMNCI classifications. The Referral Agent determines urgency. And the Synthesis Agent uses MedGemma to produce a unified clinical recommendation."
+> "The Triage Agent scores danger signs with comorbidity detection and demographic risk assessment. The Image Agent invokes MedSigLIP with trained classifiers. The Audio Agent uses HeAR embeddings for cry classification. The Protocol Agent applies WHO IMNCI guidelines with comorbidity analysis. The Referral Agent matches facility capabilities and plans pre-referral actions. And the Synthesis Agent uses MedGemma 1.5 to produce a unified clinical recommendation."
 
 **[VISUAL: Expand reasoning traces -- show step-by-step logic per agent]**
 
@@ -96,7 +96,7 @@
 
 **[VISUAL: Show metrics comparison or notebook output]**
 
-> "We also fine-tuned MedSigLIP for continuous bilirubin regression -- a novel task. A lightweight 2-layer MLP trained on 2,235 images with ground truth serum bilirubin replaces color-based heuristics with learned medical features."
+> "We also trained a 3-layer MLP with BatchNorm on frozen MedSigLIP embeddings for continuous bilirubin regression -- a novel task. Trained on 2,235 images with ground truth serum bilirubin, it achieves MAE of 2.56 mg/dL and Pearson r of 0.78, replacing color heuristics with learned medical features."
 
 ---
 
@@ -104,7 +104,7 @@
 
 **[VISUAL: Toggle Edge AI Mode in sidebar, show metrics banner]**
 
-> "For deployment, models are INT8 quantized to 101 megabytes total. NEXUS runs offline on a $100 Android phone."
+> "For deployment, models are INT8 quantized to under 289 megabytes total. MedGemma runs in 4-bit mode using just 2 GB of VRAM. NEXUS runs offline on a $100 Android phone."
 
 **[VISUAL: Edge AI metrics cards showing size reductions]**
 
@@ -139,5 +139,5 @@
 
 ---
 
-*Script Version: 2.0*
-*Last Updated: January 30, 2026*
+*Script Version: 3.0*
+*Last Updated: February 4, 2026*

@@ -30,11 +30,33 @@ MEDSIGLIP_MODEL_IDS = [
 
 
 class _BilirubinRegressor(nn.Module):
-    """2-layer MLP regression head for bilirubin prediction (mg/dL).
+    """3-layer MLP regression head with BatchNorm for bilirubin prediction (mg/dL).
 
     Must match the architecture in scripts/training/finetune_bilirubin_regression.py
     so that saved state_dict keys align.
     """
+
+    def __init__(self, input_dim: int = 1152, hidden_dim: int = 256):
+        super().__init__()
+        mid_dim = hidden_dim * 2  # 512
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, mid_dim),
+            nn.BatchNorm1d(mid_dim),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(mid_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.15),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x).squeeze(-1)
+
+
+class _BilirubinRegressorV1(nn.Module):
+    """Original 2-layer MLP for backwards compatibility with older checkpoints."""
 
     def __init__(self, input_dim: int = 1152, hidden_dim: int = 256):
         super().__init__()
@@ -58,20 +80,30 @@ class JaundiceDetector:
 
     HAI-DEF Model: google/medsiglip-448 (MedSigLIP)
     Fallback: siglip-base-patch16-224
-    Expected Accuracy: 80-90% (per NEXUS_MASTER_PLAN.md)
     """
 
     # Medical text prompts for zero-shot classification (optimized for MedSigLIP)
+    # Expanded with Kramer zone references, skin-tone context, severity gradation
     JAUNDICE_PROMPTS = [
-        "jaundiced yellow skin indicating neonatal hyperbilirubinemia",
-        "newborn with yellow skin discoloration from jaundice",
-        "neonatal jaundice requiring phototherapy assessment",
+        "newborn with visible yellow discoloration of skin indicating jaundice",
+        "neonatal skin showing yellow-orange pigmentation from hyperbilirubinemia",
+        "jaundiced infant with icteric sclera and yellow skin tone",
+        "baby with yellow skin extending to trunk and limbs Kramer zone 3",
+        "neonatal jaundice with deep yellow skin requiring phototherapy",
+        "newborn showing yellow staining of skin and conjunctiva from bilirubin",
+        "infant with moderate to severe jaundice visible on face and chest",
+        "yellow discoloration of neonatal skin consistent with elevated bilirubin",
     ]
 
     NORMAL_PROMPTS = [
-        "normal newborn skin without jaundice",
-        "healthy newborn with normal pink skin color",
-        "newborn with normal skin pigmentation no icterus",
+        "healthy newborn with normal pink skin color without jaundice",
+        "infant with normal skin pigmentation and no yellow discoloration",
+        "newborn baby with clear healthy skin and no icterus",
+        "normal neonatal skin showing pink to brown coloration without yellowing",
+        "healthy baby skin with no signs of hyperbilirubinemia",
+        "newborn with well-perfused normal colored skin and clear sclera",
+        "infant with healthy natural skin tone and no bilirubin staining",
+        "normal newborn skin without yellow or orange discoloration",
     ]
 
     # Bilirubin risk thresholds (mg/dL)
@@ -141,17 +173,51 @@ class JaundiceDetector:
         # Pre-compute text embeddings
         self._precompute_text_embeddings()
 
+        # Try to auto-load trained classifier
+        self._auto_load_classifier()
+
         # Try to load bilirubin regression model
         self._load_regressor()
 
         # Indicate which model variant is being used
         is_medsiglip = "medsiglip" in self.model_name
         model_type = "MedSigLIP" if is_medsiglip else "SigLIP (fallback)"
+        classifier_status = "trained classifier" if self.classifier else "zero-shot"
         regressor_status = "with regressor" if self.regressor else "color-based only"
-        print(f"Jaundice Detector (HAI-DEF {model_type}, {regressor_status}) initialized on {self.device}")
+        print(f"Jaundice Detector (HAI-DEF {model_type}, {classifier_status}, {regressor_status}) initialized on {self.device}")
+
+    def _auto_load_classifier(self) -> None:
+        """Auto-load trained jaundice classifier if available."""
+        if self.classifier is not None:
+            return
+
+        try:
+            import joblib
+        except ImportError:
+            return
+
+        default_paths = [
+            Path(__file__).parent.parent.parent / "models" / "linear_probes" / "jaundice_classifier.joblib",
+            Path("models/linear_probes/jaundice_classifier.joblib"),
+        ]
+
+        for path in default_paths:
+            if path.exists():
+                try:
+                    self.classifier = joblib.load(path)
+                    print(f"Auto-loaded jaundice classifier from {path}")
+                    return
+                except Exception as e:
+                    print(f"Warning: Could not load classifier from {path}: {e}")
+
+    # Logit temperature for softmax conversion
+    LOGIT_SCALE = 30.0
 
     def _precompute_text_embeddings(self) -> None:
-        """Pre-compute text embeddings for zero-shot classification using SigLIP."""
+        """Pre-compute text embeddings for zero-shot classification using SigLIP.
+
+        Stores individual prompt embeddings for max-similarity scoring.
+        """
         all_prompts = self.JAUNDICE_PROMPTS + self.NORMAL_PROMPTS
 
         with torch.no_grad():
@@ -177,15 +243,22 @@ class JaundiceDetector:
 
             text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
 
+            # Store individual embeddings for max-similarity scoring
             n_jaundice = len(self.JAUNDICE_PROMPTS)
-            self.jaundice_embeddings = text_embeddings[:n_jaundice].mean(dim=0, keepdim=True)
-            self.normal_embeddings = text_embeddings[n_jaundice:].mean(dim=0, keepdim=True)
+            self.jaundice_embeddings_all = text_embeddings[:n_jaundice]  # (N, D)
+            self.normal_embeddings_all = text_embeddings[n_jaundice:]    # (M, D)
 
+            # Also keep mean embeddings as fallback
+            self.jaundice_embeddings = self.jaundice_embeddings_all.mean(dim=0, keepdim=True)
+            self.normal_embeddings = self.normal_embeddings_all.mean(dim=0, keepdim=True)
             self.jaundice_embeddings = self.jaundice_embeddings / self.jaundice_embeddings.norm(dim=-1, keepdim=True)
             self.normal_embeddings = self.normal_embeddings / self.normal_embeddings.norm(dim=-1, keepdim=True)
 
     def _load_regressor(self) -> None:
-        """Load trained bilirubin regression head if available."""
+        """Load trained bilirubin regression head if available.
+
+        Tries the new 3-layer architecture first, falls back to V1 (2-layer).
+        """
         model_paths = [
             Path(__file__).parent.parent.parent / "models" / "linear_probes" / "bilirubin_regressor.pt",
             Path("models/linear_probes/bilirubin_regressor.pt"),
@@ -194,27 +267,51 @@ class JaundiceDetector:
         for model_path in model_paths:
             if model_path.exists():
                 try:
-                    checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+                    checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
                     input_dim = checkpoint.get("input_dim", 1152)
                     hidden_dim = checkpoint.get("hidden_dim", 256)
 
-                    # Build regression head matching BilirubinRegressorHead architecture
-                    regressor = _BilirubinRegressor(input_dim, hidden_dim)
-                    regressor.load_state_dict(checkpoint["model_state_dict"])
-                    regressor.to(self.device)
-                    regressor.eval()
+                    # Try new 3-layer architecture first, then fall back to V1
+                    for RegClass in [_BilirubinRegressor, _BilirubinRegressorV1]:
+                        try:
+                            regressor = RegClass(input_dim, hidden_dim)
+                            regressor.load_state_dict(checkpoint["model_state_dict"])
+                            regressor.to(self.device)
+                            regressor.eval()
+                            self.regressor = regressor
+                            arch = "v2 (3-layer)" if RegClass is _BilirubinRegressor else "v1 (2-layer)"
+                            print(f"Bilirubin regressor ({arch}) loaded from {model_path}")
+                            return
+                        except (RuntimeError, KeyError):
+                            continue
 
-                    self.regressor = regressor
-                    print(f"Bilirubin regressor loaded from {model_path}")
-                    return
+                    print(f"Warning: Regressor checkpoint incompatible at {model_path}")
                 except Exception as e:
                     print(f"Warning: Could not load regressor from {model_path}: {e}")
                     self.regressor = None
 
     def preprocess_image(self, image: Union[str, Path, Image.Image]) -> Image.Image:
-        """Preprocess image for analysis."""
+        """Preprocess image for analysis.
+
+        Args:
+            image: Path to image file or PIL Image object.
+
+        Returns:
+            PIL Image in RGB mode.
+
+        Raises:
+            ValueError: If the input type is unsupported.
+            FileNotFoundError: If the image file does not exist.
+        """
         if isinstance(image, (str, Path)):
-            image = Image.open(image).convert("RGB")
+            path = Path(image)
+            if not path.exists():
+                raise FileNotFoundError(f"Image file not found: {path}")
+            image = Image.open(path).convert("RGB")
+        elif isinstance(image, Image.Image):
+            image = image.convert("RGB")
+        else:
+            raise ValueError(f"Expected str, Path, or PIL Image, got {type(image)}")
         return image
 
     def estimate_bilirubin(self, image: Union[str, Path, Image.Image]) -> float:
@@ -232,6 +329,12 @@ class JaundiceDetector:
         """
         pil_image = self.preprocess_image(image)
         img_array = np.array(pil_image).astype(float)
+
+        # Ensure 3-channel RGB
+        if img_array.ndim == 2:
+            img_array = np.stack([img_array, img_array, img_array], axis=-1)
+        elif img_array.shape[-1] == 1:
+            img_array = np.concatenate([img_array] * 3, axis=-1)
 
         # Extract color channels
         r = img_array[:, :, 0]
@@ -305,7 +408,10 @@ class JaundiceDetector:
         if self.regressor is not None:
             with torch.no_grad():
                 bilirubin_pred = self.regressor(image_embedding)
-                estimated_bilirubin_ml = max(0.0, round(float(bilirubin_pred.item()), 1))
+                raw_value = float(bilirubin_pred.item())
+                # Clamp to physiologically valid range (0-35 mg/dL)
+                clamped_value = max(0.0, min(35.0, raw_value))
+                estimated_bilirubin_ml = round(clamped_value, 1)
 
         # Use ML estimate for severity when available, otherwise color-based
         bilirubin_for_severity = estimated_bilirubin_ml if estimated_bilirubin_ml is not None else estimated_bilirubin
@@ -413,7 +519,10 @@ class JaundiceDetector:
 
     def _classify_zero_shot(self, image_embedding: torch.Tensor) -> Tuple[float, str]:
         """
-        Classify using zero-shot with text embeddings.
+        Classify using zero-shot with max-similarity scoring.
+
+        Uses the maximum cosine similarity across all prompts per class
+        for better discrimination.
 
         Args:
             image_embedding: Normalized image embedding from MedSigLIP
@@ -421,12 +530,21 @@ class JaundiceDetector:
         Returns:
             Tuple of (jaundice_prob, method_name)
         """
-        # Compute similarities
-        jaundice_sim = (image_embedding @ self.jaundice_embeddings.T).squeeze().item()
-        normal_sim = (image_embedding @ self.normal_embeddings.T).squeeze().item()
+        # Max-similarity: best-matching prompt per class
+        jaundice_sims = (image_embedding @ self.jaundice_embeddings_all.T).squeeze(0)
+        normal_sims = (image_embedding @ self.normal_embeddings_all.T).squeeze(0)
 
-        # Convert to probabilities
-        logits = torch.tensor([jaundice_sim, normal_sim]) * 100
+        # Ensure at least 1-D for .max() to work on single-image inputs
+        if jaundice_sims.dim() == 0:
+            jaundice_sims = jaundice_sims.unsqueeze(0)
+        if normal_sims.dim() == 0:
+            normal_sims = normal_sims.unsqueeze(0)
+
+        jaundice_sim = jaundice_sims.max().item()
+        normal_sim = normal_sims.max().item()
+
+        # Convert to probabilities with tuned temperature
+        logits = torch.tensor([jaundice_sim, normal_sim]) * self.LOGIT_SCALE
         probs = torch.softmax(logits, dim=0)
         jaundice_prob = probs[0].item()
 
@@ -458,34 +576,48 @@ class JaundiceDetector:
 
             for j, (img_emb, pil_img) in enumerate(zip(image_embeddings, pil_images)):
                 img_emb = img_emb.unsqueeze(0)
-                jaundice_sim = (img_emb @ self.jaundice_embeddings.T).squeeze().item()
-                normal_sim = (img_emb @ self.normal_embeddings.T).squeeze().item()
 
-                logits = torch.tensor([jaundice_sim, normal_sim]) * 100
-                probs = torch.softmax(logits, dim=0)
-                jaundice_prob = probs[0].item()
+                # Use trained classifier if available, otherwise zero-shot
+                if self.classifier is not None:
+                    jaundice_prob, model_method = self._classify_with_trained_model(img_emb)
+                else:
+                    jaundice_prob, model_method = self._classify_zero_shot(img_emb)
 
+                # Color-based bilirubin
                 estimated_bilirubin = self.estimate_bilirubin(pil_img)
 
-                if estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["low"]:
+                # ML bilirubin from regressor (consistent with detect())
+                estimated_bilirubin_ml = None
+                if self.regressor is not None:
+                    with torch.no_grad():
+                        bilirubin_pred = self.regressor(img_emb)
+                        raw_value = float(bilirubin_pred.item())
+                        estimated_bilirubin_ml = round(max(0.0, min(35.0, raw_value)), 1)
+
+                bilirubin_for_severity = estimated_bilirubin_ml if estimated_bilirubin_ml is not None else estimated_bilirubin
+
+                if bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["low"]:
                     severity, needs_phototherapy = "none", False
-                elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["moderate"]:
+                elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["moderate"]:
                     severity, needs_phototherapy = "mild", False
-                elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["high"]:
+                elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["high"]:
                     severity, needs_phototherapy = "moderate", False
-                elif estimated_bilirubin < self.BILIRUBIN_THRESHOLDS["critical"]:
+                elif bilirubin_for_severity < self.BILIRUBIN_THRESHOLDS["critical"]:
                     severity, needs_phototherapy = "severe", True
                 else:
                     severity, needs_phototherapy = "critical", True
 
-                results.append({
+                result_item = {
                     "has_jaundice": jaundice_prob > self.threshold,
                     "confidence": max(jaundice_prob, 1 - jaundice_prob),
                     "jaundice_score": jaundice_prob,
                     "estimated_bilirubin": estimated_bilirubin,
                     "severity": severity,
                     "needs_phototherapy": needs_phototherapy,
-                })
+                }
+                if estimated_bilirubin_ml is not None:
+                    result_item["estimated_bilirubin_ml"] = estimated_bilirubin_ml
+                results.append(result_item)
 
         return results
 

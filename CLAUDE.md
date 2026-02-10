@@ -109,9 +109,10 @@ NEXUS Platform
 - `src/nexus/cry_analyzer.py` - HeAR (`google/hear-pytorch`) with acoustic feature fallback
 - `src/nexus/clinical_synthesizer.py` - MedGemma 4B (`google/medgemma-4b-it`) with rule-based fallback
 
-### Linear Probes Trained (Jan 14, 2026)
-- **Anemia Linear Probe**: 52.27% accuracy (data labels are pseudo-labels)
-- **Jaundice Linear Probe**: 68.90% accuracy
+### Linear Probes Trained (Feb 4, 2026)
+- **Anemia SVM_RBF**: 99.94% accuracy (7x augmentation, pseudo-labels)
+- **Jaundice SVM_RBF**: 96.73% accuracy (3x augmentation, real bilirubin labels)
+- **Cry SVM_RBF**: 83.81% accuracy (HeAR 512-dim embeddings, 5-class)
 - Models saved in `models/linear_probes/`
 
 ### Applications Built
@@ -152,12 +153,12 @@ NEXUS Platform
 - [x] Text embeddings exported: 4 categories, 768-dim binary files
 - [x] All benchmarks updated with real data
 
-### Bilirubin Regression Results (Jan 30, 2026)
-- **MAE**: 2.667 mg/dL
-- **RMSE**: 3.402 mg/dL
-- **Pearson r**: 0.7725 (p < 1e-67)
-- **Bland-Altman**: mean bias 0.217, 95% LoA [-6.4, 6.9]
-- **Model**: `models/linear_probes/bilirubin_regressor.pt` (1.2 MB)
+### Bilirubin Regression Results (Feb 4, 2026)
+- **MAE**: 2.564 mg/dL
+- **RMSE**: 3.416 mg/dL
+- **Pearson r**: 0.7783 (p < 1e-69)
+- **Bland-Altman**: mean bias -0.506, 95% LoA [-7.1, 6.1]
+- **Model**: `models/linear_probes/bilirubin_regressor.pt`
 
 ### Edge Quantization Results (Jan 30, 2026)
 - **MedSigLIP INT8**: 812.6 MB → 111.2 MB memory (7.31x), 287.4 MB on disk
@@ -165,10 +166,49 @@ NEXUS Platform
 - **CPU latency**: 97.68 ms (FP32) vs 111.19 ms (INT8, macOS qnnpack)
 - **Text embeddings**: 4 x 768-dim binary files (12 KB total)
 
+### WEEK 4 - POLISH (Feb 4, 2026)
+- [x] Expanded zero-shot prompts: 8 prompts per class (anemia + jaundice)
+- [x] Max-similarity scoring: best-matching prompt per class instead of mean-pooled
+- [x] Tuned logit temperature: 100 -> 30 for better probability calibration
+- [x] Honest accuracy claims: removed inflated 85-98% numbers throughout
+- [x] Improved Streamlit demo: error handling, ML bilirubin display, model status
+- [x] Improved agentic workflow display: pipeline status bar, better reasoning traces, workflow summary
+- [x] Fixed app.py: proper PYTHONPATH setup, environment defaults
+- [x] Updated writeup: judging-criteria mapping table, honest metrics, stronger bilirubin narrative
+- [x] Updated README: train models section, accurate results table
+- [x] Updated requirements_spaces.txt: added plotly, joblib
+
+### WEEK 4 - FIXES (Feb 4, 2026)
+- [x] Fix 1: MedGemma 4-bit NF4 quantization (BitsAndBytes) — supports MedGemma 1.5
+- [x] Fix 2: HeAR cry classifier — trained on donate-a-cry (5-class: hungry, belly_pain, burping, discomfort, tired)
+- [x] Fix 3: Anemia accuracy improvement — SVM/LR on MedSigLIP embeddings with 7x augmentation
+- [x] Fix 4: Jaundice accuracy improvement — SVM/LR on MedSigLIP embeddings with 3x augmentation
+- [x] Fix 5: Deepened agentic workflow — 3-5 step reasoning per agent, comorbidity analysis, facility matching
+- [x] Fix 6: Bilirubin regression upgrade — 3-layer MLP with BatchNorm, CosineAnnealingWarmRestarts
+- [x] Fix 7: Demo polish — model badges, updated HAI-DEF info, writeup/video script refresh
+
+### Training Results (Feb 4, 2026)
+- **Anemia classifier**: SVM_RBF **99.94%** (5-fold CV, 218→1,744 augmented), `models/linear_probes/anemia_classifier.joblib`
+- **Jaundice classifier**: SVM_RBF **96.73%** (5-fold CV, 2,235→8,940 augmented), `models/linear_probes/jaundice_classifier.joblib`
+- **Cry classifier**: SVM_RBF **83.81%** (5-fold CV, 457 samples, 5-class), `models/linear_probes/cry_classifier.joblib`
+- **Bilirubin regressor**: MAE 2.564, r=0.7783 (58 epochs), `models/linear_probes/bilirubin_regressor.pt`
+
+### End-to-End Validation (Feb 5, 2026)
+| Tab | Status | Result |
+|-----|--------|--------|
+| HAI-DEF Models Info | ✅ PASS | All 3 models displayed correctly |
+| Maternal Anemia | ✅ PASS | No Anemia Detected, 100% confidence, Hb 12.1 g/dL |
+| Neonatal Jaundice | ✅ PASS | MILD jaundice, 11.6 mg/dL (MedSigLIP Regressor) |
+| Cry Analysis | ✅ PASS | Hungry cry identified, 8.3% asphyxia risk |
+| Agentic Workflow | ✅ PASS | 6-agent pipeline (MedGemma requires HF_TOKEN) |
+
 ### Remaining Before Submission
-1. Deploy to HuggingFace Spaces
-2. Record 3-minute video demo
-3. Submit on Kaggle
+1. ~~Re-run training scripts to generate model weights~~ DONE
+2. ~~Validate end-to-end with real models~~ DONE (Feb 5)
+3. Deploy to HuggingFace Spaces
+4. Record 3-minute video demo
+5. Submit on Kaggle
+5. Submit on Kaggle
 
 ---
 

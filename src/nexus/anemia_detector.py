@@ -36,20 +36,30 @@ class AnemiaDetector:
     Uses zero-shot classification with medical prompts for detection.
     HAI-DEF Model: google/medsiglip-448 (MedSigLIP)
     Fallback: siglip-base-patch16-224
-    Expected Accuracy: 85-98% (per NEXUS_MASTER_PLAN.md)
     """
 
     # Medical text prompts for zero-shot classification (optimized for MedSigLIP)
+    # Expanded prompt set with specific clinical language for better discrimination
     ANEMIC_PROMPTS = [
-        "anemic pale conjunctiva indicating low hemoglobin",
-        "pale conjunctiva with signs of anemia",
-        "conjunctival pallor consistent with iron deficiency anemia",
+        "pale conjunctiva with visible pallor indicating anemia",
+        "conjunctival pallor grade 2 or higher with reduced vascularity",
+        "white or very pale inner eyelid mucosa suggesting low hemoglobin",
+        "conjunctiva showing significant pallor and poor blood perfusion",
+        "anemic eye with pale pink to white palpebral conjunctiva",
+        "inner eyelid lacking red coloration consistent with severe anemia",
+        "conjunctiva with washed out appearance and faint vascular pattern",
+        "pale mucous membrane of the lower eyelid suggesting iron deficiency",
     ]
 
     HEALTHY_PROMPTS = [
-        "healthy pink conjunctiva with normal blood supply",
-        "normal conjunctiva with adequate hemoglobin levels",
-        "well-perfused pink inner eyelid without pallor",
+        "healthy red conjunctiva with rich vascular pattern",
+        "well-perfused bright pink inner eyelid with visible blood vessels",
+        "normal conjunctiva showing deep red-pink coloration",
+        "conjunctiva with healthy blood supply and strong red color",
+        "richly vascularized palpebral conjunctiva with normal hemoglobin",
+        "inner eyelid with vibrant red-pink mucosa and clear vessels",
+        "non-anemic conjunctiva showing robust red perfusion",
+        "conjunctival mucosa with normal deep pink to red appearance",
     ]
 
     def __init__(
@@ -109,13 +119,48 @@ class AnemiaDetector:
         # Pre-compute text embeddings for efficiency
         self._precompute_text_embeddings()
 
+        # Try to auto-load trained classifier
+        self._auto_load_classifier()
+
         # Indicate which model variant is being used
         is_medsiglip = "medsiglip" in self.model_name
         model_type = "MedSigLIP" if is_medsiglip else "SigLIP (fallback)"
-        print(f"Anemia Detector (HAI-DEF {model_type}) initialized on {self.device}")
+        classifier_status = "with trained classifier" if self.classifier else "zero-shot"
+        print(f"Anemia Detector (HAI-DEF {model_type}, {classifier_status}) initialized on {self.device}")
+
+    def _auto_load_classifier(self) -> None:
+        """Auto-load trained anemia classifier if available."""
+        if self.classifier is not None:
+            return  # Already set externally
+
+        try:
+            import joblib
+        except ImportError:
+            return
+
+        default_paths = [
+            Path(__file__).parent.parent.parent / "models" / "linear_probes" / "anemia_classifier.joblib",
+            Path("models/linear_probes/anemia_classifier.joblib"),
+        ]
+
+        for path in default_paths:
+            if path.exists():
+                try:
+                    self.classifier = joblib.load(path)
+                    print(f"Auto-loaded anemia classifier from {path}")
+                    return
+                except Exception as e:
+                    print(f"Warning: Could not load classifier from {path}: {e}")
+
+    # Logit temperature for softmax conversion (lower = more spread, higher = sharper)
+    LOGIT_SCALE = 30.0
 
     def _precompute_text_embeddings(self) -> None:
-        """Pre-compute text embeddings for zero-shot classification using SigLIP."""
+        """Pre-compute text embeddings for zero-shot classification using SigLIP.
+
+        Stores individual prompt embeddings for max-similarity scoring,
+        which outperforms mean-pooled embeddings for medical image classification.
+        """
         all_prompts = self.ANEMIC_PROMPTS + self.HEALTHY_PROMPTS
 
         with torch.no_grad():
@@ -142,12 +187,14 @@ class AnemiaDetector:
 
             text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
 
-            # Split into anemic and healthy embeddings
+            # Store individual embeddings for max-similarity scoring
             n_anemic = len(self.ANEMIC_PROMPTS)
-            self.anemic_embeddings = text_embeddings[:n_anemic].mean(dim=0, keepdim=True)
-            self.healthy_embeddings = text_embeddings[n_anemic:].mean(dim=0, keepdim=True)
+            self.anemic_embeddings_all = text_embeddings[:n_anemic]  # (N, D)
+            self.healthy_embeddings_all = text_embeddings[n_anemic:]  # (M, D)
 
-            # Normalize averaged embeddings
+            # Also keep mean embeddings as fallback
+            self.anemic_embeddings = self.anemic_embeddings_all.mean(dim=0, keepdim=True)
+            self.healthy_embeddings = self.healthy_embeddings_all.mean(dim=0, keepdim=True)
             self.anemic_embeddings = self.anemic_embeddings / self.anemic_embeddings.norm(dim=-1, keepdim=True)
             self.healthy_embeddings = self.healthy_embeddings / self.healthy_embeddings.norm(dim=-1, keepdim=True)
 
@@ -306,7 +353,11 @@ class AnemiaDetector:
 
     def _classify_zero_shot(self, image_embedding: torch.Tensor) -> Tuple[float, float, str]:
         """
-        Classify using zero-shot with text embeddings.
+        Classify using zero-shot with max-similarity scoring.
+
+        Uses the maximum cosine similarity across all prompts per class
+        rather than mean-pooled embeddings, which provides better
+        discrimination for medical image classification.
 
         Args:
             image_embedding: Normalized image embedding from MedSigLIP
@@ -314,12 +365,21 @@ class AnemiaDetector:
         Returns:
             Tuple of (anemia_prob, healthy_prob, method_name)
         """
-        # Compute similarities
-        anemia_sim = (image_embedding @ self.anemic_embeddings.T).squeeze().item()
-        healthy_sim = (image_embedding @ self.healthy_embeddings.T).squeeze().item()
+        # Max-similarity: take the best-matching prompt per class
+        anemia_sims = (image_embedding @ self.anemic_embeddings_all.T).squeeze(0)
+        healthy_sims = (image_embedding @ self.healthy_embeddings_all.T).squeeze(0)
 
-        # Convert to probabilities using softmax
-        logits = torch.tensor([anemia_sim, healthy_sim]) * 100  # Scale for better separation
+        # Ensure at least 1-D for .max() to work on single-image inputs
+        if anemia_sims.dim() == 0:
+            anemia_sims = anemia_sims.unsqueeze(0)
+        if healthy_sims.dim() == 0:
+            healthy_sims = healthy_sims.unsqueeze(0)
+
+        anemia_sim = anemia_sims.max().item()
+        healthy_sim = healthy_sims.max().item()
+
+        # Convert to probabilities with tuned temperature
+        logits = torch.tensor([anemia_sim, healthy_sim], device="cpu") * self.LOGIT_SCALE
         probs = torch.softmax(logits, dim=0)
         anemia_prob = probs[0].item()
         healthy_prob = probs[1].item()
@@ -371,13 +431,46 @@ class AnemiaDetector:
 
                 image_embeddings = image_embeddings / image_embeddings.norm(dim=-1, keepdim=True)
 
-            # Compute similarities for each image
+            # Compute max-similarities for each image
             for j, img_emb in enumerate(image_embeddings):
                 img_emb = img_emb.unsqueeze(0)
-                anemia_sim = (img_emb @ self.anemic_embeddings.T).squeeze().item()
-                healthy_sim = (img_emb @ self.healthy_embeddings.T).squeeze().item()
 
-                logits = torch.tensor([anemia_sim, healthy_sim]) * 100
+                # Use trained classifier if available, otherwise zero-shot
+                if self.classifier is not None:
+                    anemia_prob, healthy_prob, _ = self._classify_with_trained_model(img_emb)
+                    # Skip zero-shot path below
+                    if anemia_prob > 0.7:
+                        risk_level = "high"
+                        recommendation = "URGENT: Refer for blood test immediately."
+                    elif anemia_prob > 0.5:
+                        risk_level = "medium"
+                        recommendation = "Schedule blood test within 48 hours."
+                    else:
+                        risk_level = "low"
+                        recommendation = "No immediate concern."
+
+                    results.append({
+                        "is_anemic": anemia_prob > self.threshold,
+                        "confidence": max(anemia_prob, healthy_prob),
+                        "anemia_score": anemia_prob,
+                        "healthy_score": healthy_prob,
+                        "risk_level": risk_level,
+                        "recommendation": recommendation,
+                    })
+                    continue
+
+                anemia_sims = (img_emb @ self.anemic_embeddings_all.T).squeeze(0)
+                healthy_sims = (img_emb @ self.healthy_embeddings_all.T).squeeze(0)
+
+                if anemia_sims.dim() == 0:
+                    anemia_sims = anemia_sims.unsqueeze(0)
+                if healthy_sims.dim() == 0:
+                    healthy_sims = healthy_sims.unsqueeze(0)
+
+                anemia_sim = anemia_sims.max().item()
+                healthy_sim = healthy_sims.max().item()
+
+                logits = torch.tensor([anemia_sim, healthy_sim], device="cpu") * self.LOGIT_SCALE
                 probs = torch.softmax(logits, dim=0)
                 anemia_prob = probs[0].item()
                 healthy_prob = probs[1].item()

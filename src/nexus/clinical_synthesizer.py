@@ -4,7 +4,8 @@ Clinical Synthesizer Module
 Uses MedGemma from Google HAI-DEF for clinical reasoning and synthesis.
 Combines findings from MedSigLIP (images) and HeAR (audio) into actionable recommendations.
 
-HAI-DEF Model: MedGemma 4B (google/medgemma-4b-it)
+HAI-DEF Model: MedGemma 4B (google/medgemma-4b-it or google/medgemma-1.5-4b-it)
+Supports 4-bit quantization via BitsAndBytes for low-VRAM deployment.
 """
 
 import torch
@@ -17,13 +18,20 @@ try:
 except ImportError:
     HAS_TRANSFORMERS = False
 
+try:
+    from transformers import BitsAndBytesConfig
+    HAS_BITSANDBYTES = True
+except ImportError:
+    HAS_BITSANDBYTES = False
+
 
 class ClinicalSynthesizer:
     """
     Synthesizes clinical findings using MedGemma.
 
-    HAI-DEF Model: MedGemma 4B (google/medgemma-4b-it)
+    HAI-DEF Model: MedGemma 4B (google/medgemma-4b-it or google/medgemma-1.5-4b-it)
     Method: Prompt engineering (no fine-tuning required)
+    Quantization: 4-bit NF4 via BitsAndBytes for low-VRAM deployment
 
     Output:
     - Integrated diagnosis suggestions
@@ -40,25 +48,35 @@ class ClinicalSynthesizer:
         "RED": "Urgent referral - immediate action required",
     }
 
+    # MedGemma model candidates in preference order
+    MEDGEMMA_MODEL_IDS = [
+        "google/medgemma-1.5-4b-it",  # Newer, better performance
+        "google/medgemma-4b-it",       # Original HAI-DEF model
+    ]
+
     def __init__(
         self,
-        model_name: str = "google/medgemma-4b-it",
+        model_name: Optional[str] = None,
         device: Optional[str] = None,
         use_medgemma: bool = True,
+        use_4bit: bool = True,
     ):
         """
         Initialize the Clinical Synthesizer with MedGemma.
 
         Args:
-            model_name: HuggingFace model name for MedGemma
+            model_name: HuggingFace model name for MedGemma (auto-selects if None)
             device: Device to run model on
             use_medgemma: Whether to use MedGemma (True) or rule-based (False)
+            use_4bit: Whether to use 4-bit quantization (reduces VRAM from ~8GB to ~2GB)
         """
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_name = model_name
+        self._user_model_name = model_name  # None if user didn't specify
+        self.model_name = model_name or self.MEDGEMMA_MODEL_IDS[-1]
         self.model = None
         self.tokenizer = None
         self.use_medgemma = use_medgemma
+        self.use_4bit = use_4bit
         self._medgemma_available = False
 
         if use_medgemma and HAS_TRANSFORMERS:
@@ -70,35 +88,98 @@ class ClinicalSynthesizer:
         print(f"Clinical Synthesizer (HAI-DEF MedGemma) initialized")
 
     def _load_medgemma(self) -> None:
-        """Load MedGemma model from HuggingFace."""
+        """Load MedGemma model from HuggingFace with 4-bit quantization.
+
+        Tries model candidates in preference order:
+        1. google/medgemma-1.5-4b-it (newer, better performance)
+        2. google/medgemma-4b-it (original HAI-DEF model)
+
+        Uses BitsAndBytes NF4 quantization to reduce VRAM from ~8GB to ~2GB,
+        which fixes CUDA OOM errors on consumer GPUs.
+        """
         import os
         hf_token = os.environ.get("HF_TOKEN")
         if not hf_token:
             print("Warning: HF_TOKEN not set. MedGemma is a gated model and requires authentication.")
             print("Set HF_TOKEN environment variable with your HuggingFace token.")
 
-        try:
-            print(f"Loading MedGemma model: {self.model_name}")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name, token=hf_token
-            )
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                token=hf_token,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
-            )
-            if self.device == "cpu":
-                self.model = self.model.to(self.device)
-            self._medgemma_available = True
-            print("MedGemma loaded successfully")
-        except Exception as e:
-            print(f"Warning: Could not load MedGemma: {e}")
-            print("Falling back to rule-based synthesis")
-            self.model = None
-            self.tokenizer = None
-            self.use_medgemma = False
-            self._medgemma_available = False
+        # Determine models to try — if user explicitly passed a model_name,
+        # only try that one; otherwise try all candidates in preference order.
+        models_to_try = [self._user_model_name] if self._user_model_name else self.MEDGEMMA_MODEL_IDS
+
+        # Build quantization config for 4-bit loading
+        bnb_config = None
+        if self.use_4bit and self.device == "cuda" and HAS_BITSANDBYTES:
+            try:
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                )
+                print("4-bit quantization enabled (NF4 + double quant)")
+            except Exception as e:
+                print(f"Warning: Could not create BitsAndBytes config: {e}")
+                bnb_config = None
+
+        for candidate_model in models_to_try:
+            try:
+                print(f"Loading MedGemma model: {candidate_model}")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    candidate_model, token=hf_token
+                )
+
+                load_kwargs = {
+                    "token": hf_token,
+                    "device_map": "auto" if self.device == "cuda" else None,
+                }
+
+                if bnb_config is not None:
+                    # 4-bit quantized loading (~2GB VRAM)
+                    load_kwargs["quantization_config"] = bnb_config
+                else:
+                    # Standard loading with fp16/fp32
+                    load_kwargs["torch_dtype"] = (
+                        torch.float16 if self.device == "cuda" else torch.float32
+                    )
+
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    candidate_model, **load_kwargs
+                )
+
+                if self.device == "cpu" and bnb_config is None:
+                    self.model = self.model.to(self.device)
+
+                self.model_name = candidate_model
+                self._medgemma_available = True
+                quant_status = "4-bit NF4" if bnb_config is not None else "fp16/fp32"
+                print(f"MedGemma loaded successfully: {candidate_model} ({quant_status})")
+                return
+
+            except Exception as e:
+                print(f"Warning: Could not load {candidate_model}: {e}")
+                continue
+
+        print("Could not load any MedGemma model. Falling back to rule-based synthesis.")
+        self.model = None
+        self.tokenizer = None
+        self.use_medgemma = False
+        self._medgemma_available = False
+
+    @staticmethod
+    def _sanitize(value: object) -> str:
+        """Sanitize a value for safe inclusion in a prompt.
+
+        Strips control characters and truncates excessively long strings to
+        prevent prompt injection via adversarial findings.
+        """
+        text = str(value) if value is not None else "N/A"
+        # Remove characters that could break prompt structure
+        text = text.replace("\x00", "").replace("\r", "")
+        # Truncate overly long values
+        if len(text) > 500:
+            text = text[:500] + "..."
+        return text
 
     def _build_prompt(self, findings: Dict) -> str:
         """
@@ -116,10 +197,10 @@ class ClinicalSynthesizer:
         anemia = findings.get("anemia", {})
         jaundice = findings.get("jaundice", {})
         cry = findings.get("cry", {})
-        symptoms = findings.get("symptoms", "None reported")
+        symptoms = self._sanitize(findings.get("symptoms", "None reported"))
         patient_info = findings.get("patient_info", {})
         agent_context = findings.get("agent_context", {})
-        agent_reasoning = findings.get("agent_reasoning_summary", "")
+        agent_reasoning = self._sanitize(findings.get("agent_reasoning_summary", ""))
 
         prompt = f"""You are a pediatric health assistant helping community health workers in low-resource settings.
 
@@ -200,30 +281,67 @@ Focus on actionable steps they can take immediately.
             return self._synthesize_rule_based(findings)
 
     def _synthesize_with_medgemma(self, findings: Dict) -> Dict:
-        """Synthesize using MedGemma model."""
-        prompt = self._build_prompt(findings)
+        """Synthesize using MedGemma model.
 
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        Falls back to rule-based synthesis if generation fails (e.g. CUDA OOM,
+        device-side assertion, or any other runtime error).
+        """
+        try:
+            prompt = self._build_prompt(findings)
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=500,
-                temperature=0.7,
-                do_sample=True,
-                top_p=0.9,
-            )
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
+            # For models loaded with device_map="auto", route inputs to the
+            # embedding layer's device to avoid CPU/CUDA mismatch.
+            try:
+                input_device = self.model.get_input_embeddings().weight.device
+            except Exception:
+                input_device = self.device
+            inputs = {k: v.to(input_device) for k, v in inputs.items()}
 
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        # Extract only the generated part (after the prompt)
-        response = response[len(prompt):].strip()
+            prompt_len = inputs["input_ids"].shape[-1]
 
-        return {
-            "summary": response,
-            "model": "MedGemma 4B",
-            "generated_at": datetime.now().isoformat(),
-            "findings_used": list(findings.keys()),
-        }
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=500,
+                    temperature=0.7,
+                    do_sample=True,
+                    top_p=0.9,
+                )
+
+            # Extract only the generated tokens (after the prompt)
+            generated_ids = outputs[0][prompt_len:]
+            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+            # Guard against empty or very short responses
+            if len(response) < 20:
+                return self._synthesize_rule_based(findings)
+
+            # Determine display name for the model
+            if "1.5" in self.model_name:
+                display_name = "MedGemma 1.5 4B"
+            else:
+                display_name = "MedGemma 4B"
+
+            return {
+                "summary": response,
+                "model": display_name,
+                "model_id": self.model_name,
+                "generated_at": datetime.now().isoformat(),
+                "findings_used": list(findings.keys()),
+            }
+        except Exception as e:
+            print(f"MedGemma generation failed: {e}. Falling back to rule-based synthesis.")
+            # Disable MedGemma to avoid repeated CUDA errors that corrupt the
+            # device context and break subsequent GPU operations.
+            self.use_medgemma = False
+            self._medgemma_available = False
+            self.model = None
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            return self._synthesize_rule_based(findings)
 
     def _synthesize_rule_based(self, findings: Dict) -> Dict:
         """

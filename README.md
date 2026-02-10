@@ -43,7 +43,7 @@ Each agent produces structured reasoning traces for a full audit trail.
 ```bash
 # Clone and install
 git clone <repo-url>
-cd MedGemmaImpactChallenge
+cd nexus
 pip install -r requirements.txt
 
 # Set HuggingFace token (required for MedSigLIP, MedGemma)
@@ -63,6 +63,16 @@ PYTHONPATH=src uvicorn api.main:app --reload
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
+### Train Models
+
+```bash
+# Train linear probes (anemia + jaundice classifiers)
+PYTHONPATH=src python scripts/training/train_linear_probes.py
+
+# Train bilirubin regression head
+PYTHONPATH=src python scripts/training/finetune_bilirubin_regression.py
+```
+
 ### HuggingFace Spaces
 
 ```bash
@@ -73,7 +83,7 @@ python app.py
 ## Project Structure
 
 ```
-MedGemmaImpactChallenge/
+nexus/
 ├── src/nexus/                         # Core platform
 │   ├── anemia_detector.py             # MedSigLIP anemia detection
 │   ├── jaundice_detector.py           # MedSigLIP jaundice + bilirubin regression
@@ -86,7 +96,10 @@ MedGemmaImpactChallenge/
 ├── scripts/
 │   ├── training/
 │   │   ├── train_linear_probes.py     # MedSigLIP embedding classifiers
-│   │   └── finetune_bilirubin_regression.py  # Novel bilirubin regression
+│   │   ├── finetune_bilirubin_regression.py  # Novel bilirubin regression
+│   │   ├── train_anemia.py            # Anemia-specific training
+│   │   ├── train_jaundice.py          # Jaundice-specific training
+│   │   └── train_cry.py              # Cry classifier training
 │   └── edge/
 │       ├── quantize_models.py         # INT8 quantization
 │       └── export_embeddings.py       # Pre-computed text embeddings
@@ -96,40 +109,42 @@ MedGemmaImpactChallenge/
 │   ├── 03_cry_analysis.ipynb
 │   └── 04_bilirubin_regression.ipynb  # Novel task reproducibility
 ├── tests/
-│   ├── test_pipeline.py               # Pipeline tests (27 tests)
-│   ├── test_agentic_workflow.py        # Agentic workflow tests (41 tests)
+│   ├── test_pipeline.py               # Pipeline tests
+│   ├── test_agentic_workflow.py       # Agentic workflow tests (41 tests)
 │   └── test_hai_def_integration.py    # HAI-DEF model compliance
 ├── models/
 │   ├── linear_probes/                 # Trained classifiers + regressor
 │   └── edge/                          # Quantized models + embeddings
+├── data/
+│   ├── raw/                           # Raw datasets (Eyes-Defy-Anemia, NeoJaundice, CryCeleb)
+│   └── protocols/                     # WHO IMNCI protocols
 ├── submission/
-│   ├── writeup.md                     # Competition writeup
-│   └── video/DEMO_VIDEO_SCRIPT.md     # Video script
+│   ├── writeup.md                     # Competition writeup (3 pages)
+│   └── video/                         # Demo video script and assets
 ├── app.py                             # HuggingFace Spaces entry point
 ├── requirements.txt                   # Full dependencies
 └── requirements_spaces.txt            # HF Spaces minimal dependencies
 ```
 
-## Key Features
+## Key Results
 
-### Agentic Workflow (6 Agents)
-Each agent produces step-by-step reasoning traces:
-1. **TriageAgent** - Danger sign scoring, severity triage
-2. **ImageAnalysisAgent** - MedSigLIP anemia/jaundice detection
-3. **AudioAnalysisAgent** - HeAR cry pattern analysis
-4. **ProtocolAgent** - WHO IMNCI classification mapping
-5. **ReferralAgent** - Urgency routing and referral decisions
-6. **SynthesisAgent** - MedGemma clinical reasoning with full agent context
+| Task | Method | Performance |
+|------|--------|-------------|
+| Anemia zero-shot | MedSigLIP (max-similarity, 8 prompts/class) | Screening capability |
+| Jaundice classification | MedSigLIP linear probe | 68.9% accuracy |
+| **Bilirubin regression** | **MedSigLIP + MLP head** | **MAE: 2.667 mg/dL, r=0.77** |
+| Cry analysis | HeAR + acoustic features | Qualitative assessment |
+| Clinical synthesis | MedGemma + WHO IMNCI | Protocol-aligned recommendations |
 
 ### Novel Task: Bilirubin Regression
 Frozen MedSigLIP embeddings -> 2-layer MLP -> continuous bilirubin (mg/dL) prediction.
 Trained on 2,235 NeoJaundice images with ground truth serum bilirubin.
+**MAE: 2.667 mg/dL, Pearson r: 0.7725 (p < 1e-67)**
 
 ### Edge AI
-- INT8 dynamic quantization (~75% model size reduction)
-- Pre-computed text embeddings (no text encoder on device)
-- TorchScript export for mobile deployment
-- Total on-device: ~101 MB
+- INT8 dynamic quantization: 812.6 MB -> 111.2 MB (7.31x compression)
+- Pre-computed text embeddings: 12 KB (no text encoder on device)
+- Total on-device: ~289 MB
 
 ## Competition Tracks
 
@@ -139,14 +154,11 @@ Trained on 2,235 NeoJaundice images with ground truth serum bilirubin.
 ## Tests
 
 ```bash
-# All tests (68 total)
+# All tests
 PYTHONPATH=src python -m pytest tests/ -v
 
 # Agentic workflow only (41 tests)
 PYTHONPATH=src python -m pytest tests/test_agentic_workflow.py -v
-
-# Pipeline only (27 tests)
-PYTHONPATH=src python -m pytest tests/test_pipeline.py -v
 ```
 
 ## License

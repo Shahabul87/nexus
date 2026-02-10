@@ -1,0 +1,31 @@
+{
+  "model_type": "SVM_RBF",
+  "embedding_source": "MedSigLIP (google/medsiglip-448)",
+  "embedding_dim": 1152,
+  "num_classes": 2,
+  "classes": {
+    "normal": 0,
+    "jaundice": 1
+  },
+  "bilirubin_threshold": 5.0,
+  "cv_accuracy_mean": 0.967337807606264,
+  "cv_accuracy_std": 0.002197637886396911,
+  "num_original_samples": 2235,
+  "num_augmented_samples": 8940,
+  "augmentations_per_image": 3,
+  "all_results": {
+    "LogisticRegression": {
+      "mean_accuracy": 0.9422818791946309,
+      "std_accuracy": 0.004750953150245027
+    },
+    "SVM_RBF": {
+      "mean_accuracy": 0.967337807606264,
+      "std_accuracy": 0.002197637886396911
+    },
+    "SVM_Linear": {
+      "mean_accuracy": 0.9322147651006712,
+      "std_accuracy": 0.006743027683714353
+    }
+  },
+  "seed": 42
+}
