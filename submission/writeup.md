@@ -118,9 +118,9 @@ Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
 
 ## Links
 
-- **Video Demo (3 min)**: [YouTube Link - TO BE ADDED]
-- **Public Code Repository**: [GitHub Link - TO BE ADDED]
-- **Live Demo**: [HuggingFace Spaces Link - TO BE ADDED]
+- **Video Demo (3 min)**: [YouTube Link - TO BE ADDED AFTER RECORDING]
+- **Public Code Repository**: [github.com/Shahabul87/nexus](https://github.com/Shahabul87/nexus)
+- **Live Demo**: [huggingface.co/spaces/Shahabul/nexus](https://huggingface.co/spaces/Shahabul/nexus)
 
 ---
 

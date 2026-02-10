@@ -1,3 +1,20 @@
+---
+title: NEXUS
+emoji: "\U0001FA7A"
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: true
+license: cc-by-4.0
+tags:
+  - medgemma
+  - medical-ai
+  - hai-def
+  - maternal-health
+  - neonatal-care
+---
+
 # NEXUS - AI-Powered Maternal-Neonatal Assessment Platform
 
 > Non-invasive screening for maternal anemia, neonatal jaundice, and birth asphyxia using Google HAI-DEF models

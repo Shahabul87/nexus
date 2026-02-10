@@ -1,26 +1,33 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# System dependencies for audio/image processing
+# Install system dependencies for audio processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements and install
+COPY requirements_spaces.txt .
+RUN pip install --no-cache-dir -r requirements_spaces.txt
 
-# Copy application code
+# Copy source code
 COPY src/ src/
-COPY api/ api/
 COPY models/ models/
+COPY app.py .
 
-# Set Python path
-ENV PYTHONPATH=/app/src:/app
+# Set environment
+ENV PYTHONPATH=/app/src
+ENV STREAMLIT_SERVER_PORT=7860
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV STREAMLIT_SERVER_HEADLESS=true
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
-EXPOSE 8000
+EXPOSE 7860
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "streamlit", "run", "src/demo/streamlit_app.py", \
+     "--server.port=7860", \
+     "--server.address=0.0.0.0", \
+     "--server.headless=true", \
+     "--browser.gatherUsageStats=false"]
