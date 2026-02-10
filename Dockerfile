@@ -1,6 +1,11 @@
+# HuggingFace Spaces Docker SDK — NEXUS Streamlit Demo
+# Docs: https://huggingface.co/docs/hub/spaces-sdks-docker
+
 FROM python:3.12-slim
 
-WORKDIR /app
+# Create non-root user (required by HF Spaces)
+RUN useradd -m -u 1000 user
+ENV PATH="/home/user/.local/bin:$PATH"
 
 # Install system dependencies for audio processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,14 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
-COPY requirements_spaces.txt .
-RUN pip install --no-cache-dir -r requirements_spaces.txt
+WORKDIR /app
+
+# Copy requirements and install as user
+COPY --chown=user ./requirements_spaces.txt requirements_spaces.txt
+RUN pip install --no-cache-dir --upgrade -r requirements_spaces.txt
+
+# Switch to non-root user
+USER user
 
 # Copy source code
-COPY src/ src/
-COPY models/ models/
-COPY app.py .
+COPY --chown=user ./src/ src/
+COPY --chown=user ./models/ models/
+COPY --chown=user ./app.py .
 
 # Set environment
 ENV PYTHONPATH=/app/src
