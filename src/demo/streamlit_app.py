@@ -328,7 +328,8 @@ def render_anemia_screening():
         )
 
         if uploaded_file:
-            st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
+            image_bytes = uploaded_file.getvalue()
+            st.image(image_bytes, caption="Uploaded Image", use_container_width=True)
 
     with col2:
         st.subheader("Analysis Results")
@@ -408,7 +409,8 @@ def render_jaundice_detection():
         )
 
         if uploaded_file:
-            st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
+            image_bytes = uploaded_file.getvalue()
+            st.image(image_bytes, caption="Uploaded Image", use_container_width=True)
 
         # Patient info
         st.subheader("Patient Information (Optional)")
@@ -597,7 +599,7 @@ def render_combined_assessment():
             key="combined_anemia"
         )
         if anemia_file:
-            st.image(anemia_file, use_container_width=True)
+            st.image(anemia_file.getvalue(), use_container_width=True)
             with st.spinner("Analyzing..."):
                 try:
                     detector, load_err = load_anemia_detector()
@@ -623,7 +625,7 @@ def render_combined_assessment():
             key="combined_jaundice"
         )
         if jaundice_file:
-            st.image(jaundice_file, use_container_width=True)
+            st.image(jaundice_file.getvalue(), use_container_width=True)
             with st.spinner("Analyzing..."):
                 try:
                     detector, load_err = load_jaundice_detector()
