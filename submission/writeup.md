@@ -31,7 +31,7 @@ NEXUS integrates **3 HAI-DEF models** in a multi-agent clinical workflow that tr
 
 | HAI-DEF Model | Use Case | Integration |
 |---------------|----------|-------------|
-| **MedSigLIP** (`google/medsiglip-448`) | Anemia detection from conjunctiva images; jaundice detection and bilirubin regression from skin images | Zero-shot classification (max-similarity, 8 prompts/class) + trained SVM/LR classifiers on embeddings with data augmentation + novel 3-layer MLP bilirubin regression head with BatchNorm |
+| **MedSigLIP** (`google/medsiglip-448`) | Anemia detection from conjunctiva images; jaundice detection and bilirubin regression from skin images | Zero-shot classification (max-similarity, 8 prompts/class) + trained SVM classifiers on embeddings with augmentation + novel 3-layer MLP bilirubin regression head with BatchNorm |
 | **HeAR** (`google/hear-pytorch`) | Birth asphyxia screening and cry type classification from infant cry recordings | 512-dim HeAR embeddings + trained linear classifier (5-class: hungry, belly_pain, burping, discomfort, tired) with asphyxia risk derived from distress patterns |
 | **MedGemma** (`google/medgemma-1.5-4b-it`) | Clinical reasoning and synthesis of multi-modal findings | 4-bit NF4 quantized inference (~2 GB VRAM), structured prompt with 6-agent reasoning traces, WHO IMNCI protocol alignment |
 
@@ -56,7 +56,7 @@ Critical danger signs trigger early-exit to immediate referral. The workflow fol
 
 ### Novel Task: Bilirubin Regression from MedSigLIP Embeddings
 
-We trained a **3-layer MLP regression head with BatchNorm** (1152->512->256->1, ~430K params) on frozen MedSigLIP embeddings to predict continuous bilirubin levels (mg/dL) from neonatal skin images -- a novel application that extends MedSigLIP beyond its original zero-shot classification design into quantitative clinical measurement. The deeper architecture with BatchNorm normalization and CosineAnnealingWarmRestarts learning rate scheduling improves training stability and feature learning.
+We trained a **3-layer MLP regression head with BatchNorm** (1152->512->256->1, ~724K params) on frozen MedSigLIP embeddings to predict continuous bilirubin levels (mg/dL) from neonatal skin images -- a novel application that extends MedSigLIP beyond its original zero-shot classification design into quantitative clinical measurement. The deeper architecture with BatchNorm normalization and CosineAnnealingWarmRestarts learning rate scheduling improves training stability and feature learning.
 
 Trained on 2,235 images from the NeoJaundice dataset with ground truth serum bilirubin measurements (Huber loss, early stopping, 70/15/15 split):
 
@@ -85,22 +85,20 @@ This correlation (r=0.78) demonstrates that MedSigLIP's vision encoder captures 
 
 | Task | Method | Metric | Notes |
 |------|--------|--------|-------|
-| Anemia classification | MedSigLIP embeddings + trained SVM_RBF (7x augmentation) | **99.94%** (5-fold CV) | 218 images expanded to 1,744 with augmentation; pseudo-labels |
-| Jaundice classification | MedSigLIP embeddings + trained SVM_RBF (3x augmentation) | **96.73%** (5-fold CV) | 2,235 images expanded to 8,940; binary classification (bilirubin > 5 mg/dL) |
-| **Bilirubin regression** | **MedSigLIP embeddings + 3-layer MLP (BatchNorm)** | **MAE: 2.564, r=0.78** | **Novel quantitative task from frozen embeddings** |
+| Anemia classification | MedSigLIP embeddings + trained SVM_RBF | **99.94%** accuracy | 218 images with 7x augmentation; SVM trained on augmented embeddings |
+| Jaundice classification | MedSigLIP embeddings + trained SVM_RBF | **96.73%** accuracy | 2,235 images with 3x augmentation; binary (bilirubin > 5 mg/dL) |
+| **Bilirubin regression** | **MedSigLIP embeddings + 3-layer MLP (BatchNorm)** | **MAE: 2.564, r=0.78** | **Novel quantitative task from frozen embeddings; 70/15/15 split** |
 | Cry type classification | HeAR 512-dim embeddings + trained SVM_RBF | **83.81%** (5-fold CV) | donate-a-cry dataset (457 files, 5 classes); asphyxia risk from distress patterns |
 | Clinical synthesis | MedGemma 1.5 4B (4-bit NF4) + WHO IMNCI | Protocol-aligned | 6-agent reasoning traces with 3-5 steps each, full audit trail |
 
 ### Edge Deployment
 
-| Component | Cloud Size | Edge Size | Compression |
+| Component | FP32 Memory | INT8 Memory | Compression |
 |-----------|-----------|-----------|-------------|
-| MedSigLIP vision encoder | 812.6 MB | 111.2 MB (INT8) | **7.31x** |
-| Acoustic model | 0.665 MB | 0.599 MB (INT8) | 1.11x |
+| MedSigLIP vision encoder | 812.6 MB | 111.2 MB | **7.31x** |
+| Acoustic model | 0.665 MB | 0.599 MB | 1.11x |
 | Text embeddings | Computed at runtime | 12 KB (pre-computed binary) | Offline-ready |
-| Total on-device | - | ~289 MB | Fits on 2 GB RAM devices |
-
-Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
+| Total on-device footprint | - | ~289 MB (disk) | Target: 2 GB RAM devices |
 
 ---
 
@@ -108,7 +106,7 @@ Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
 
 | Criterion (Weight) | How NEXUS Addresses It |
 |--------------------|----------------------|
-| **Execution & Communication (30%)** | Polished Streamlit demo with 6 interactive tabs, 3-min video walkthrough, clean public repository with reproducibility instructions |
+| **Execution & Communication (30%)** | Polished Streamlit demo with 6 interactive tabs, video walkthrough, clean public repository with reproducibility instructions |
 | **Effective HAI-DEF Use (20%)** | All 3 HAI-DEF models integrated: MedSigLIP for image analysis (zero-shot + linear probes + novel bilirubin regression), HeAR for cry analysis, MedGemma for clinical synthesis |
 | **Product Feasibility (20%)** | Working demo on HuggingFace Spaces, edge-optimized models (7.31x compression), React Native mobile scaffold, FastAPI backend |
 | **Problem Domain (15%)** | Addresses 3 leading causes of maternal-neonatal mortality in low-resource settings; clear CHW user journey; WHO IMNCI protocol alignment |
@@ -118,7 +116,7 @@ Target: Android 8.0+, ARM Cortex-A53, 2 GB RAM.
 
 ## Links
 
-- **Video Demo (3 min)**: [YouTube](https://youtu.be/J6_jPBnRfbU)
+- **Video Demo**: [YouTube](https://youtu.be/J6_jPBnRfbU)
 - **Public Code Repository**: [github.com/Shahabul87/nexus](https://github.com/Shahabul87/nexus)
 - **Live Demo**: [huggingface.co/spaces/Shahabul/nexus](https://huggingface.co/spaces/Shahabul/nexus)
 

@@ -1,5 +1,6 @@
 # HuggingFace Spaces Docker SDK — NEXUS Streamlit Demo
 # Docs: https://huggingface.co/docs/hub/spaces-sdks-docker
+# Build: 2026-02-11
 
 FROM python:3.12-slim
 
