@@ -110,6 +110,9 @@ mobile/android/app/build/
 .cache/
 huggingface/
 
+# Claude Code config
+CLAUDE.md
+
 # Submission packaged (contains duplicates)
 submission/code/packaged/
 *.zip
