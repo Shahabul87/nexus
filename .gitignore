@@ -113,6 +113,32 @@ huggingface/
 # Claude Code config
 CLAUDE.md
 
+# Internal planning docs (keep local only)
+CODEBASE_GAP_ANALYSIS.md
+DATASET_ACQUISITION_GUIDE.md
+NEXUS_MASTER_PLAN.md
+TECHNICAL_IMPLEMENTATION_GUIDE.md
+SETTINGS.json
+competition_terms_and_condtions.md
+dataset_description.md
+directory_structure.txt
+entry_points.md
+medgemma_impact_challenge.md
+wining_model_documentation_guidelines.md
+
+# Deploy scripts (local only)
+deploy_hf.py
+deploy_to_hf_spaces.sh
+
+# Submission internal files
+submission/video/demo_script.md
+submission/video/frames/
+submission/video/output/
+submission/video/DEMO_RECORDING_CHECKLIST.md
+submission/writeup/SUBMISSION_WRITEUP.md
+submission/code/package_submission.sh
+submission/diagrams/
+
 # Submission packaged (contains duplicates)
 submission/code/packaged/
 *.zip
